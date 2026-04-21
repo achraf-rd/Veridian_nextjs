@@ -1,0 +1,81 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-debug.log*
+
+# Next.js
+.next/
+out/
+dist/
+.vercel/
+
+# Testing
+coverage/
+.nyc_output/
+*.lcov
+.tap/
+
+# Production
+build/
+.env*.production
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+desktop.ini
+
+# Logs
+logs/
+*.log
+lerna-debug.log*
+
+# Cache
+.eslintcache
+.stylelintcache
+.turbo/
+.cache/
+.next/cache/
+
+# Temporary files
+tmp/
+temp/
+.cache
+
+# Editor directories and files
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Browser extensions
+extension/dist
+
+# Misc
+.pnp
+.pnp.js
+*.pem

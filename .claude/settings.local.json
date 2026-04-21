@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(touch C:/Users/pc/Desktop/my/pfe2026/project/Veridian_frontend/src/types/pipeline.ts)",
+      "Bash(touch C:/Users/pc/Desktop/my/pfe2026/project/Veridian_frontend/src/types/project.ts)",
+      "Bash(touch C:/Users/pc/Desktop/my/pfe2026/project/Veridian_frontend/src/types/conversation.ts)",
+      "Bash(touch C:/Users/pc/Desktop/my/pfe2026/project/Veridian_frontend/src/styles/tokens.css)",
+      "Bash(touch C:/Users/pc/Desktop/my/pfe2026/project/Veridian_frontend/src/services/api.ts)",
+      "Bash(mkdir -p \"C:/Users/pc/Desktop/my/pfe2026/project/Veridian_frontend/src/app/project/[projectId]/conversation/[conversationId]/requirements\")",
+      "Bash(mkdir -p \"C:/Users/pc/Desktop/my/pfe2026/project/Veridian_frontend/src/app/project/[projectId]/conversation/[conversationId]/scenarios\")",
+      "Bash(mkdir -p \"C:/Users/pc/Desktop/my/pfe2026/project/Veridian_frontend/src/app/project/[projectId]/conversation/[conversationId]/simulation\")",
+      "Bash(mkdir -p \"C:/Users/pc/Desktop/my/pfe2026/project/Veridian_frontend/src/app/project/[projectId]/conversation/[conversationId]/report\")",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}
