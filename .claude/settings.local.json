@@ -13,7 +13,13 @@
       "Bash(npm install *)",
       "Bash(npm run *)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(timeout 60 npx next build)",
+      "Bash(npx next *)",
+      "Bash(echo \"started pid=$!\" sleep 8 cat /tmp/veridian-dev.log)",
+      "Bash(curl -s -o /tmp/req-page.html -w \"HTTP=%{http_code}\\\\n\" \"http://localhost:3042/project/demo/conversation/demo-conv/requirements\")",
+      "Read(//tmp/**)"
     ]
   }
 }

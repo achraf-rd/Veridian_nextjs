@@ -127,6 +127,8 @@ function buildAgentMessage(entryStage: 1 | 2): string {
 
 interface PipelineStore {
   pipelines: Record<string, ConversationPipeline>
+  hasHydrated: boolean
+  hydrate: () => void
   getPipeline: (id: string) => ConversationPipeline
   submit: (id: string, input: string) => void
   approveNLP: (id: string) => void
@@ -135,19 +137,21 @@ interface PipelineStore {
 }
 
 export const usePipelineStore = create<PipelineStore>((set, get) => {
-  // Load from localStorage on init
-  const loadFromStorage = () => {
-    if (typeof window === 'undefined') return {}
-    try {
-      const stored = localStorage.getItem('veridian-pipelines')
-      return stored ? JSON.parse(stored) : {}
-    } catch {
-      return {}
-    }
-  }
-
   return {
-    pipelines: loadFromStorage(),
+    pipelines: {},
+    hasHydrated: false,
+
+    hydrate: () => {
+      if (typeof window === 'undefined') return
+      if (get().hasHydrated) return
+      try {
+        const stored = localStorage.getItem('veridian-pipelines')
+        const pipelines = stored ? JSON.parse(stored) : {}
+        set({ pipelines, hasHydrated: true })
+      } catch {
+        set({ hasHydrated: true })
+      }
+    },
 
     getPipeline: (id) => get().pipelines[id] ?? BLANK,
 

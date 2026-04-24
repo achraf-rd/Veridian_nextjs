@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import { Bot } from 'lucide-react'
 import { usePipelineStore } from '@/stores/pipelineStore'
@@ -61,10 +62,17 @@ function PriorRound({ round }: { round: PipelineRound }) {
 export default function ThreadPage() {
   const params = useParams() as { conversationId?: string } | null
   const convId = params?.conversationId ?? ''
-  const { getPipeline } = usePipelineStore()
+  const { getPipeline, hasHydrated, hydrate } = usePipelineStore()
+
+  useEffect(() => {
+    hydrate()
+  }, [hydrate])
+
   const pipeline = getPipeline(convId)
 
-  if (pipeline.stage === 0) {
+  // Until localStorage has been read on the client, render the SSR-matching
+  // empty-stage shell so hydration doesn't diverge.
+  if (!hasHydrated || pipeline.stage === 0) {
     return (
       <div className="flex h-full items-center justify-center px-4">
         <Composer conversationId={convId} centered />
