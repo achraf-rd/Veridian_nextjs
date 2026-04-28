@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { ConversationPipeline, NLPTaskProgress, ScenarioResult, ExecutionResult, ReportResult, LogLine, PipelineRound } from '@/types/pipeline'
 import type { RefinementResult, RefinedRequirement } from '@/types/requirements'
 import { MOCK_REFINEMENT } from '@/components/requirements-review/mockData'
+import { MOCK_DEMO_PIPELINE } from '@/stores/mockData'
 import { streamRefineRequirements } from '@/services/api'
 
 function normalizeRequirement(raw: Record<string, unknown>, index: number): RefinedRequirement {
@@ -144,7 +145,7 @@ interface PipelineStore {
   hasHydrated: boolean
   hydrate: () => void
   getPipeline: (id: string) => ConversationPipeline
-  submit: (id: string, input: string) => void
+  submit: (id: string, requirements: string[], label?: string) => void
   approveNLP: (id: string) => void
   approveScenario: (id: string) => void
   refactor: (id: string, instruction: string) => void
@@ -160,7 +161,11 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
       if (get().hasHydrated) return
       try {
         const stored = localStorage.getItem('veridian-pipelines')
-        const pipelines = stored ? JSON.parse(stored) : {}
+        let pipelines = stored ? JSON.parse(stored) : {}
+        // Seed demo conversation for first-time users
+        if (!pipelines['conv-1']) {
+          pipelines['conv-1'] = MOCK_DEMO_PIPELINE
+        }
         set({ pipelines, hasHydrated: true })
       } catch {
         set({ hasHydrated: true })
@@ -169,10 +174,10 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
 
     getPipeline: (id) => get().pipelines[id] ?? BLANK,
 
-  submit: (id, input) => {
-    const requirements = input.split('\n').map(l => l.trim()).filter(Boolean)
+  submit: (id, requirements, label) => {
+    const engineerInput = label ?? requirements.join('\n')
     set((s) => {
-      const newState = { pipelines: { ...s.pipelines, [id]: { ...BLANK, stage: 1, nlp: 'processing' as const, engineerInput: input } } }
+      const newState = { pipelines: { ...s.pipelines, [id]: { ...BLANK, stage: 1, nlp: 'processing' as const, engineerInput } } }
       localStorage.setItem('veridian-pipelines', JSON.stringify(newState.pipelines))
       return newState as Partial<PipelineStore>
     })
@@ -190,6 +195,11 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
 
       try {
         for await (const event of streamRefineRequirements(requirements)) {
+          // Log SSE events in development
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`[SSE] ${event.type}`, event)
+          }
+
           if (event.type === 'stage') {
             updateProgress(event.name, {
               stageNum: event.stage,

@@ -407,14 +407,18 @@ function TaskRow({
 
       {/* Trailing info */}
       <span className="ml-auto font-mono text-[11px] flex items-center gap-2">
-        {status === 'running' && isRetrying && (
-          <span className="text-warning">retry {attempt}/{maxAttempts}</span>
+        {status === 'running' && (
+          <>
+            {maxAttempts && maxAttempts > 1 && (
+              <span className={cn(isRetrying ? 'text-warning' : 'text-primary')}>
+                attempt {attempt}/{maxAttempts}
+              </span>
+            )}
+            <span className="text-primary animate-pulse">{isRetrying ? 'retrying…' : 'running…'}</span>
+          </>
         )}
         {status === 'done' && (
           <span className="text-success">{message ?? task.done}</span>
-        )}
-        {status === 'running' && !isRetrying && (
-          <span className="text-primary animate-pulse">running…</span>
         )}
       </span>
     </div>

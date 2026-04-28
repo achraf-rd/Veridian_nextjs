@@ -1,5 +1,5 @@
 // test-sse.js
-const url = "https://agentic-ai-adas-requirements-refiner.onrender.com/refine/stream";
+const url = "https://adas-req-refiner.fly.dev/refine/stream";
 
 async function testSSE() {
   const response = await fetch(url, {

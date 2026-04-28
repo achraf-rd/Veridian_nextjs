@@ -1,8 +1,12 @@
 'use client'
 
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react'
-import { Send, FileText, Type, ChevronDown, PlugZap, Cloud, GitBranch, LayoutList, FileSpreadsheet, CheckCircle2, RefreshCw } from 'lucide-react'
+import {
+  Send, FileText, Type, ChevronDown, PlugZap, Cloud, GitBranch,
+  LayoutList, FileSpreadsheet, CheckCircle2, RefreshCw, X, Loader2, AlertCircle,
+} from 'lucide-react'
 import { usePipelineStore } from '@/stores/pipelineStore'
+import { ACCEPTED_EXTENSIONS } from '@/lib/file-parsers'
 import { cn } from '@/lib/utils'
 
 type InputMode = 'text' | 'file' | 'connector'
@@ -13,21 +17,24 @@ interface ComposerProps {
 }
 
 const MODELS = [
-  { id: 'queen3', label: 'Queen3', desc: 'Most capable' },
+  { id: 'queen3',  label: 'Queen3',  desc: 'Most capable' },
   { id: 'gpt-oss', label: 'GPT OSS', desc: 'Balanced' },
-  { id: 'kimik2', label: 'Kimik2', desc: 'Fast' },
+  { id: 'kimik2',  label: 'Kimik2',  desc: 'Fast' },
 ]
 
 const CONNECTORS = [
-  { id: 'jira',       label: 'Jira',          desc: 'Sprint / epic picker',        icon: LayoutList },
-  { id: 'azure',      label: 'Azure DevOps',  desc: 'Work items & test plans',     icon: Cloud },
-  { id: 'github',     label: 'GitHub Issues', desc: 'Filter by label or milestone', icon: GitBranch },
-  { id: 'sharepoint', label: 'SharePoint',    desc: 'Excel requirements files',    icon: FileSpreadsheet },
+  { id: 'jira',       label: 'Jira',          desc: 'Sprint / epic picker',         icon: LayoutList },
+  { id: 'azure',      label: 'Azure DevOps',  desc: 'Work items & test plans',      icon: Cloud },
+  { id: 'github',     label: 'GitHub Issues', desc: 'Filter by label or milestone',  icon: GitBranch },
+  { id: 'sharepoint', label: 'SharePoint',    desc: 'Excel requirements files',      icon: FileSpreadsheet },
 ]
 
 export default function Composer({ conversationId, centered }: ComposerProps) {
   const [mode, setMode] = useState<InputMode>('text')
   const [value, setValue] = useState('')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [fileError, setFileError] = useState<string | null>(null)
+  const [isParsing, setIsParsing] = useState(false)
   const [selectedModel, setSelectedModel] = useState('gpt-oss')
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
   const [connectorDropdownOpen, setConnectorDropdownOpen] = useState(false)
@@ -63,24 +70,64 @@ export default function Composer({ conversationId, centered }: ComposerProps) {
     }
   }, [connectorDropdownOpen])
 
-  const handleSend = () => {
-    const trimmed = value.trim()
-    if (!trimmed) return
+  const clearFile = () => {
+    setSelectedFile(null)
+    setFileError(null)
+    if (fileRef.current) fileRef.current.value = ''
+    setMode('text')
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setSelectedFile(file)
+    setFileError(null)
+    setMode('file')
+  }
+
+  const canSend = isParsing
+    ? false
+    : mode === 'file'
+      ? selectedFile !== null
+      : value.trim().length > 0
+
+  const handleSend = async () => {
+    if (!canSend) return
+
     if (isComplete) {
-      refactor(conversationId, trimmed)
-    } else {
-      submit(conversationId, trimmed)
+      refactor(conversationId, value.trim())
+      setValue('')
+      return
     }
+
+    if (mode === 'file' && selectedFile) {
+      setIsParsing(true)
+      setFileError(null)
+      try {
+        const form = new FormData()
+        form.append('file', selectedFile)
+        const res = await fetch('/api/parse-file', { method: 'POST', body: form })
+        const json = await res.json() as { requirements?: string[]; error?: string }
+        if (!res.ok || !json.requirements) {
+          setFileError(json.error ?? 'Failed to parse file')
+          return
+        }
+        submit(conversationId, json.requirements, selectedFile.name)
+        clearFile()
+      } finally {
+        setIsParsing(false)
+      }
+      return
+    }
+
+    // Text / connector mode
+    const requirements = value.trim().split('\n').map(l => l.trim()).filter(Boolean)
+    submit(conversationId, requirements)
     setValue('')
   }
 
   const handleKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
-  }
-
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) setValue(`[File: ${file.name}]`)
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleSend() }
   }
 
   const handleConnectorSelect = (connectorId: string) => {
@@ -95,14 +142,13 @@ export default function Composer({ conversationId, centered }: ComposerProps) {
 
   const getPlaceholder = () => {
     if (isComplete) return 'Describe a change — e.g. "Increase pedestrian detection distance to 25 m in AEB scenarios"'
-    if (mode === 'file') return 'File selected — press Enter to submit'
     if (mode === 'connector' && activeConnectorData) return `Connected to ${activeConnectorData.label} — describe which items to pull…`
-    return 'Enter requirements, or describe a change to the current batch…'
+    return 'Enter requirements, one per line…'
   }
 
   const getHint = () => {
     if (isComplete) return 'Post-completion refactor · agent detects entry stage'
-    if (mode === 'file') return '.xlsx or .md accepted'
+    if (mode === 'file') return ACCEPTED_EXTENSIONS.join('  ') + ' accepted'
     if (mode === 'connector') return `MCP — ${activeConnectorData?.label ?? 'connector'}`
     return 'Shift+Enter for newline'
   }
@@ -133,7 +179,7 @@ export default function Composer({ conversationId, centered }: ComposerProps) {
         <div className="flex items-center gap-1 px-3 pt-2">
           {/* Text mode */}
           <button
-            onClick={() => setMode('text')}
+            onClick={() => { clearFile(); setMode('text') }}
             className={cn(
               'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
               mode === 'text'
@@ -147,7 +193,7 @@ export default function Composer({ conversationId, centered }: ComposerProps) {
 
           {/* File mode */}
           <button
-            onClick={() => { setMode('file'); fileRef.current?.click() }}
+            onClick={() => fileRef.current?.click()}
             className={cn(
               'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
               mode === 'file'
@@ -207,19 +253,51 @@ export default function Composer({ conversationId, centered }: ComposerProps) {
             )}
           </div>
 
-          <input ref={fileRef} type="file" accept=".xlsx,.md" className="hidden" onChange={handleFile} />
-
+          <input
+            ref={fileRef}
+            type="file"
+            accept={ACCEPTED_EXTENSIONS.join(',')}
+            className="hidden"
+            onChange={handleFileChange}
+          />
         </div>
 
-        {/* Textarea */}
-        <textarea
-          rows={centered ? 4 : 2}
-          placeholder={getPlaceholder()}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={handleKey}
-          className="w-full bg-transparent resize-none px-4 py-3 text-sm text-vrd-text placeholder:text-vrd-text-dim focus:outline-none font-mono"
-        />
+        {/* File chip — shown instead of textarea when a file is selected */}
+        {mode === 'file' && selectedFile ? (
+          <div className="px-4 py-3">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 w-fit max-w-full">
+              <FileSpreadsheet className="w-4 h-4 text-primary-light flex-shrink-0" />
+              <span className="text-sm text-vrd-text font-mono truncate max-w-xs">
+                {selectedFile.name}
+              </span>
+              <span className="text-[11px] text-vrd-text-dim flex-shrink-0">
+                {(selectedFile.size / 1024).toFixed(0)} KB
+              </span>
+              <button
+                onClick={clearFile}
+                className="ml-1 text-vrd-text-muted hover:text-vrd-text transition-colors flex-shrink-0"
+                aria-label="Remove file"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            {fileError && (
+              <div className="flex items-center gap-1.5 mt-2 text-xs text-danger">
+                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                {fileError}
+              </div>
+            )}
+          </div>
+        ) : (
+          <textarea
+            rows={centered ? 4 : 2}
+            placeholder={getPlaceholder()}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={handleKey}
+            className="w-full bg-transparent resize-none px-4 py-3 text-sm text-vrd-text placeholder:text-vrd-text-dim focus:outline-none font-mono"
+          />
+        )}
 
         {/* Footer */}
         <div className="flex items-center justify-between px-3 pb-2 gap-2">
@@ -257,8 +335,8 @@ export default function Composer({ conversationId, centered }: ComposerProps) {
           </div>
 
           <button
-            onClick={handleSend}
-            disabled={!value.trim()}
+            onClick={() => void handleSend()}
+            disabled={!canSend}
             className={cn(
               'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed',
               isComplete
@@ -266,8 +344,12 @@ export default function Composer({ conversationId, centered }: ComposerProps) {
                 : 'bg-primary hover:bg-primary-hover',
             )}
           >
-            {isComplete ? <RefreshCw className="w-3 h-3" /> : <Send className="w-3 h-3" />}
-            {isComplete ? 'Refactor' : 'Send'}
+            {isParsing
+              ? <><Loader2 className="w-3 h-3 animate-spin" />Parsing…</>
+              : isComplete
+                ? <><RefreshCw className="w-3 h-3" />Refactor</>
+                : <><Send className="w-3 h-3" />Send</>
+            }
           </button>
         </div>
       </div>

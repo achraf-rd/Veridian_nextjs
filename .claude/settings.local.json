@@ -19,7 +19,10 @@
       "Bash(npx next *)",
       "Bash(echo \"started pid=$!\" sleep 8 cat /tmp/veridian-dev.log)",
       "Bash(curl -s -o /tmp/req-page.html -w \"HTTP=%{http_code}\\\\n\" \"http://localhost:3042/project/demo/conversation/demo-conv/requirements\")",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(node -e ' *)",
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(npm list *)"
     ]
   }
 }
