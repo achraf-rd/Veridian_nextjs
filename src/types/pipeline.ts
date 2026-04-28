@@ -1,22 +1,21 @@
+import type { RefinementResult } from '@/types/requirements'
+
 export type CardState = 'idle' | 'processing' | 'awaiting' | 'approved' | 'failed'
 
-export interface Requirement {
-  id: string
-  text: string
-  scenarioType: string
-  speed?: number
-  distance?: number
-  passCriteria: string
-  conflict: boolean
-  overlap: boolean
+export interface NLPTaskProgress {
+  stageNum: number
+  status: 'running' | 'completed'
+  attempt: number
+  maxAttempts: number
+  message?: string
 }
 
-export interface NLPResult {
-  total: number
-  conflicts: number
-  overlaps: number
-  requirements: Requirement[]
-}
+export type RefinementEvent =
+  | { type: 'stage'; stage: number; name: string; label: string; status: 'running' | 'completed'; message?: string; attempt?: number; max_attempts?: number }
+  | { type: 'attempt'; name: string; attempt: number; max: number }
+  | { type: 'validation_failed'; name: string; attempt: number; max: number }
+  | { type: 'result'; output: RefinementResult }
+  | { type: 'error'; detail: string }
 
 export interface ScenarioFile {
   id: string
@@ -64,7 +63,7 @@ export interface PipelineRound {
   round: number
   completedAt: string
   engineerInput: string
-  nlpResult: NLPResult | null
+  nlpResult: RefinementResult | null
   scenarioResult: ScenarioResult | null
   executionResult: ExecutionResult | null
   reportResult: ReportResult | null
@@ -83,7 +82,8 @@ export interface ConversationPipeline {
   scenario: CardState
   execution: CardState
   report: CardState
-  nlpResult: NLPResult | null
+  nlpResult: RefinementResult | null
+  nlpProgress: Record<string, NLPTaskProgress>
   scenarioResult: ScenarioResult | null
   executionResult: ExecutionResult | null
   reportResult: ReportResult | null

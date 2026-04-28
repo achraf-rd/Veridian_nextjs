@@ -208,6 +208,7 @@ export default function Composer({ conversationId, centered }: ComposerProps) {
           </div>
 
           <input ref={fileRef} type="file" accept=".xlsx,.md" className="hidden" onChange={handleFile} />
+
         </div>
 
         {/* Textarea */}

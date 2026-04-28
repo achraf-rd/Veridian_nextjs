@@ -9,7 +9,7 @@ import StatsRow from '@/components/requirements-review/StatsRow'
 import RequirementsSidebar from '@/components/requirements-review/RequirementsSidebar'
 import RequirementDetail from '@/components/requirements-review/RequirementDetail'
 import ConflictPanel from '@/components/requirements-review/ConflictPanel'
-import { MOCK_REFINEMENT } from '@/components/requirements-review/mockData'
+import { usePipelineStore } from '@/stores/pipelineStore'
 
 export default function RequirementsReviewPage() {
   const router = useRouter()
@@ -17,10 +17,11 @@ export default function RequirementsReviewPage() {
   const projectId = params?.projectId ?? ''
   const convId = params?.conversationId ?? ''
 
-  const data = MOCK_REFINEMENT
+  const { getPipeline } = usePipelineStore()
+  const data = getPipeline(convId).nlpResult
 
   const [selectedReqId, setSelectedReqId] = useState<string | null>(
-    data.requirements[0]?.id ?? null,
+    data?.requirements[0]?.id ?? null,
   )
   const [selectedConflictId, setSelectedConflictId] = useState<string | null>(null)
   const [editedTexts, setEditedTexts] = useState<Record<string, string>>({})
@@ -32,20 +33,21 @@ export default function RequirementsReviewPage() {
 
   const resolvedConflictIds = useMemo(() => {
     const resolved = new Set<string>()
-    for (const c of data.conflicts) {
+    for (const c of (data?.conflicts ?? [])) {
       const allEdited = c.requirements.every((rid) => editedIds.has(rid))
       if (allEdited || dismissedConflicts.has(c.conflict_id)) {
         resolved.add(c.conflict_id)
       }
     }
     return resolved
-  }, [data.conflicts, editedIds, dismissedConflicts])
+  }, [data?.conflicts, editedIds, dismissedConflicts])
 
-  const effectiveConflicts = data.summary.total_conflicts - resolvedConflictIds.size
+  const effectiveConflicts = (data?.summary.total_conflicts ?? 0) - resolvedConflictIds.size
   const isReady = effectiveConflicts === 0
-  const totalScenarios = data.requirements.reduce((sum, r) => sum + r.num_scenarios, 0)
+  const totalScenarios = data?.requirements.reduce((sum, r) => sum + r.num_scenarios, 0) ?? 0
 
   const activeConflict = useMemo(() => {
+    if (!data) return null
     if (selectedConflictId) {
       return data.conflicts.find((c) => c.conflict_id === selectedConflictId) ?? null
     }
@@ -54,14 +56,22 @@ export default function RequirementsReviewPage() {
       return data.conflicts.find((c) => c.conflict_id === req.conflict_id) ?? null
     }
     return null
-  }, [data.conflicts, data.requirements, selectedReqId, selectedConflictId])
+  }, [data, selectedReqId, selectedConflictId])
 
   const highlightedReqIds = useMemo(() => {
     if (!activeConflict) return new Set<string>()
     return new Set(activeConflict.requirements)
   }, [activeConflict])
 
-  const selectedReq = data.requirements.find((r) => r.id === selectedReqId) ?? null
+  const selectedReq = data?.requirements.find((r) => r.id === selectedReqId) ?? null
+
+  if (!data) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-vrd-text-muted">
+        No requirements data yet — submit and process a batch first.
+      </div>
+    )
+  }
 
   const handleSelectRequirement = (id: string) => {
     setSelectedReqId(id)

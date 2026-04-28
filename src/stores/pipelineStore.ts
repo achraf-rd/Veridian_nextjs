@@ -1,33 +1,47 @@
 import { create } from 'zustand'
-import type { ConversationPipeline, NLPResult, ScenarioResult, ExecutionResult, ReportResult, LogLine, PipelineRound } from '@/types/pipeline'
+import type { ConversationPipeline, NLPTaskProgress, ScenarioResult, ExecutionResult, ReportResult, LogLine, PipelineRound } from '@/types/pipeline'
+import type { RefinementResult, RefinedRequirement } from '@/types/requirements'
+import { MOCK_REFINEMENT } from '@/components/requirements-review/mockData'
+import { streamRefineRequirements } from '@/services/api'
 
-const NLP_RESULT: NLPResult = {
-  total: 47, conflicts: 3, overlaps: 2,
-  requirements: [
-    { id: 'req-001', text: 'System shall detect pedestrian at ≥15 m distance in city scenarios', scenarioType: 'AEB', distance: 15, passCriteria: 'TTC ≥ 1.5 s at activation', conflict: false, overlap: false },
-    { id: 'req-002', text: 'AEB shall activate when TTC < 2.5 s at city speed (50 km/h)', scenarioType: 'AEB', speed: 50, passCriteria: 'Full stop before collision', conflict: true, overlap: false },
-    { id: 'req-003', text: 'AEB shall activate when TTC < 2.0 s at city speed (50 km/h)', scenarioType: 'AEB', speed: 50, passCriteria: 'Full stop before collision', conflict: true, overlap: false },
-    { id: 'req-004', text: 'Reaction latency from detection to brake must be ≤ 250 ms', scenarioType: 'AEB', passCriteria: 'Latency ≤ 250 ms', conflict: false, overlap: false },
-    { id: 'req-005', text: 'Reaction latency from detection to brake must be ≤ 200 ms', scenarioType: 'AEB', passCriteria: 'Latency ≤ 200 ms', conflict: true, overlap: false },
-    { id: 'req-006', text: 'Lane keeping assist shall maintain lane at speeds ≥ 70 km/h', scenarioType: 'LKA', speed: 70, passCriteria: 'Lateral deviation < 0.1 m', conflict: false, overlap: false },
-    { id: 'req-007', text: 'LKA shall correct heading within 2 s when drift detected', scenarioType: 'LKA', passCriteria: 'Heading corrected ≤ 2 s', conflict: false, overlap: true },
-    { id: 'req-008', text: 'LKA shall correct heading within 1.5 s when drift detected', scenarioType: 'LKA', passCriteria: 'Heading corrected ≤ 1.5 s', conflict: false, overlap: true },
-  ],
+function normalizeRequirement(raw: Record<string, unknown>, index: number): RefinedRequirement {
+  const original = (raw.original as string) ?? ''
+  return {
+    id:                      (raw.id as string) ?? `REQ-${String(index + 1).padStart(3, '0')}`,
+    original,
+    refined:                 (raw.refined as string) ?? (raw.requirement as string) ?? (raw.text as string) ?? original,
+    issues_found:            (raw.issues_found as string[]) ?? [],
+    status:                  (raw.status as RefinedRequirement['status']) ?? 'unchanged',
+    overlap_with:            (raw.overlap_with as string[]) ?? [],
+    conflict_flag:           (raw.conflict_flag as boolean) ?? false,
+    conflict_id:             (raw.conflict_id as string | null) ?? null,
+    complexity:              (raw.complexity as RefinedRequirement['complexity']) ?? 'LOW',
+    complexity_justification:(raw.complexity_justification as string) ?? '',
+    num_scenarios:           (raw.num_scenarios as number) ?? 1,
+  }
 }
 
-// Updated NLP result for round 2 refactors that re-run NLP
-const NLP_RESULT_V2: NLPResult = {
-  total: 52, conflicts: 1, overlaps: 1,
-  requirements: [
-    { id: 'req-001', text: 'System shall detect pedestrian at ≥25 m distance in city scenarios', scenarioType: 'AEB', distance: 25, passCriteria: 'TTC ≥ 1.5 s at activation', conflict: false, overlap: false },
-    { id: 'req-002', text: 'AEB shall activate when TTC < 2.0 s at city speed (50 km/h)', scenarioType: 'AEB', speed: 50, passCriteria: 'Full stop before collision', conflict: false, overlap: false },
-    { id: 'req-004', text: 'Reaction latency from detection to brake must be ≤ 200 ms', scenarioType: 'AEB', passCriteria: 'Latency ≤ 200 ms', conflict: false, overlap: false },
-    { id: 'req-006', text: 'Lane keeping assist shall maintain lane at speeds ≥ 70 km/h', scenarioType: 'LKA', speed: 70, passCriteria: 'Lateral deviation < 0.1 m', conflict: false, overlap: false },
-    { id: 'req-007', text: 'LKA shall correct heading within 2 s when drift detected', scenarioType: 'LKA', passCriteria: 'Heading corrected ≤ 2 s', conflict: false, overlap: true },
-    { id: 'req-009', text: 'AEB shall handle bicycle crossing at intersection with TTC < 1.8 s', scenarioType: 'AEB', passCriteria: 'Full stop before collision', conflict: false, overlap: false },
-    { id: 'req-010', text: 'AEB shall activate for stationary obstacles at city speed', scenarioType: 'AEB', passCriteria: 'TTC ≥ 1.2 s at activation', conflict: false, overlap: false },
-    { id: 'req-011', text: 'System shall handle wet road conditions with adjusted braking distance', scenarioType: 'AEB', passCriteria: 'Latency ≤ 200 ms', conflict: true, overlap: false },
-  ],
+function normalizeResult(raw: unknown): RefinementResult {
+  const r = (raw ?? {}) as Record<string, unknown>
+  const rawReqs = (r.requirements as Record<string, unknown>[]) ?? []
+  const requirements = rawReqs.map(normalizeRequirement)
+  const summary = (r.summary as Record<string, unknown>) ?? {}
+  return {
+    refining_id:     (r.refining_id as string) ?? '',
+    feature:         (r.feature as string) ?? '',
+    source_file:     (r.source_file as string) ?? 'input',
+    pipeline_status: (r.pipeline_status as RefinementResult['pipeline_status']) ?? { status: 'ready', reason: '', blocked_by: [] },
+    summary: {
+      total_raw:       (summary.total_raw as number)       ?? requirements.length,
+      total_refined:   (summary.total_refined as number)   ?? requirements.length,
+      total_removed:   (summary.total_removed as number)   ?? 0,
+      total_conflicts: (summary.total_conflicts as number) ?? 0,
+      total_overlaps:  (summary.total_overlaps as number)  ?? 0,
+    },
+    requirements,
+    removed:   (r.removed as RefinementResult['removed'])     ?? [],
+    conflicts: (r.conflicts as RefinementResult['conflicts'])  ?? [],
+  }
 }
 
 const SCENARIO_RESULT: ScenarioResult = {
@@ -109,7 +123,7 @@ const REPORT_RESULT_V2: ReportResult = {
 const BLANK: ConversationPipeline = {
   stage: 0, round: 1, entryStage: 1, agentMessage: null,
   nlp: 'idle', scenario: 'idle', execution: 'idle', report: 'idle',
-  engineerInput: null, nlpResult: null, scenarioResult: null,
+  engineerInput: null, nlpResult: null, nlpProgress: {}, scenarioResult: null,
   executionResult: null, reportResult: null, priorRounds: [],
 }
 
@@ -156,20 +170,67 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
     getPipeline: (id) => get().pipelines[id] ?? BLANK,
 
   submit: (id, input) => {
+    const requirements = input.split('\n').map(l => l.trim()).filter(Boolean)
     set((s) => {
       const newState = { pipelines: { ...s.pipelines, [id]: { ...BLANK, stage: 1, nlp: 'processing' as const, engineerInput: input } } }
       localStorage.setItem('veridian-pipelines', JSON.stringify(newState.pipelines))
       return newState as Partial<PipelineStore>
     })
-    setTimeout(() => {
-      set((s) => {
-        const p = s.pipelines[id]
-        if (!p || p.nlp !== 'processing') return s
-        const newState = { pipelines: { ...s.pipelines, [id]: { ...p, nlp: 'awaiting' as const, nlpResult: NLP_RESULT } } }
-        localStorage.setItem('veridian-pipelines', JSON.stringify(newState.pipelines))
-        return newState as Partial<PipelineStore>
-      })
-    }, 2500)
+
+    ;(async () => {
+      const updateProgress = (nodeName: string, patch: Partial<NLPTaskProgress>) => {
+        set((s) => {
+          const p = s.pipelines[id]
+          if (!p || p.nlp !== 'processing') return s
+          const existing = p.nlpProgress[nodeName] ?? { stageNum: 0, status: 'running', attempt: 1, maxAttempts: 1 }
+          const nlpProgress = { ...p.nlpProgress, [nodeName]: { ...existing, ...patch } }
+          return { pipelines: { ...s.pipelines, [id]: { ...p, nlpProgress } } } as Partial<PipelineStore>
+        })
+      }
+
+      try {
+        for await (const event of streamRefineRequirements(requirements)) {
+          if (event.type === 'stage') {
+            updateProgress(event.name, {
+              stageNum: event.stage,
+              status: event.status,
+              ...(event.max_attempts ? { maxAttempts: event.max_attempts } : {}),
+              ...(event.status === 'completed' && event.message ? { message: event.message } : {}),
+            })
+          } else if (event.type === 'attempt') {
+            updateProgress(event.name, { attempt: event.attempt, maxAttempts: event.max })
+          } else if (event.type === 'validation_failed') {
+            updateProgress(event.name, { status: 'running', attempt: event.attempt, maxAttempts: event.max })
+          } else if (event.type === 'result') {
+            set((s) => {
+              const p = s.pipelines[id]
+              if (!p || p.nlp !== 'processing') return s
+              const updated = { ...p, nlp: 'awaiting' as const, nlpResult: normalizeResult(event.output), nlpProgress: {} }
+              const pipelines = { ...s.pipelines, [id]: updated }
+              localStorage.setItem('veridian-pipelines', JSON.stringify(pipelines))
+              return { pipelines } as Partial<PipelineStore>
+            })
+          } else if (event.type === 'error') {
+            set((s) => {
+              const p = s.pipelines[id]
+              if (!p) return s
+              const pipelines = { ...s.pipelines, [id]: { ...p, nlp: 'failed' as const, nlpProgress: {} } }
+              localStorage.setItem('veridian-pipelines', JSON.stringify(pipelines))
+              return { pipelines } as Partial<PipelineStore>
+            })
+          }
+        }
+      } catch (err) {
+        console.error('[pipeline] SSE stream error:', err)
+        set((s) => {
+          const p = s.pipelines[id]
+          if (!p) return s
+          const pipelines = { ...s.pipelines, [id]: { ...p, nlp: 'failed' as const, nlpProgress: {} } }
+          localStorage.setItem('veridian-pipelines', JSON.stringify(pipelines))
+          return { pipelines } as Partial<PipelineStore>
+        })
+      }
+    })()
   },
 
   approveNLP: (id) => {
@@ -269,7 +330,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
         set((s) => {
           const cur = s.pipelines[id]
           if (!cur || cur.nlp !== 'processing') return s
-          const newState = { pipelines: { ...s.pipelines, [id]: { ...cur, nlp: 'awaiting' as const, nlpResult: NLP_RESULT_V2 } } }
+          const newState = { pipelines: { ...s.pipelines, [id]: { ...cur, nlp: 'awaiting' as const, nlpResult: MOCK_REFINEMENT } } }
           localStorage.setItem('veridian-pipelines', JSON.stringify(newState.pipelines))
           return newState as Partial<PipelineStore>
         })
