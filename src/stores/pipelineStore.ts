@@ -1,47 +1,69 @@
 import { create } from 'zustand'
 import type { ConversationPipeline, NLPTaskProgress, ScenarioResult, ExecutionResult, ReportResult, LogLine, PipelineRound } from '@/types/pipeline'
-import type { RefinementResult, RefinedRequirement } from '@/types/requirements'
+import type { RefinementResult, ValidRequirement, IncompleteRequirement } from '@/types/requirements'
 import { MOCK_REFINEMENT } from '@/components/requirements-review/mockData'
 import { MOCK_DEMO_PIPELINE } from '@/stores/mockData'
 import { streamRefineRequirements } from '@/services/api'
 
-function normalizeRequirement(raw: Record<string, unknown>, index: number): RefinedRequirement {
-  const original = (raw.original as string) ?? ''
+function normalizeValidRequirement(raw: Record<string, unknown>, index: number): ValidRequirement {
   return {
-    id:                      (raw.id as string) ?? `REQ-${String(index + 1).padStart(3, '0')}`,
-    original,
-    refined:                 (raw.refined as string) ?? (raw.requirement as string) ?? (raw.text as string) ?? original,
+    id:                      (raw.id as string) ?? `req-${String(index + 1).padStart(3, '0')}`,
+    original:                (raw.original as string) ?? '',
     issues_found:            (raw.issues_found as string[]) ?? [],
-    status:                  (raw.status as RefinedRequirement['status']) ?? 'unchanged',
+    status:                  'valid',
     overlap_with:            (raw.overlap_with as string[]) ?? [],
     conflict_flag:           (raw.conflict_flag as boolean) ?? false,
     conflict_id:             (raw.conflict_id as string | null) ?? null,
-    complexity:              (raw.complexity as RefinedRequirement['complexity']) ?? 'LOW',
+    complexity:              (raw.complexity as ValidRequirement['complexity']) ?? 'LOW',
     complexity_justification:(raw.complexity_justification as string) ?? '',
     num_scenarios:           (raw.num_scenarios as number) ?? 1,
+  }
+}
+
+function normalizeIncompleteRequirement(raw: Record<string, unknown>, index: number): IncompleteRequirement {
+  return {
+    id:           (raw.id as string) ?? `req-incomplete-${index + 1}`,
+    original:     (raw.original as string) ?? '',
+    issues_found: (raw.issues_found as string[]) ?? [],
+    status:       'incomplete',
   }
 }
 
 function normalizeResult(raw: unknown): RefinementResult {
   const r = (raw ?? {}) as Record<string, unknown>
   const rawReqs = (r.requirements as Record<string, unknown>[]) ?? []
-  const requirements = rawReqs.map(normalizeRequirement)
+  const rawIncomplete = (r.incomplete as Record<string, unknown>[]) ?? []
+  const requirements = rawReqs.map(normalizeValidRequirement)
+  const incomplete = rawIncomplete.map(normalizeIncompleteRequirement)
   const summary = (r.summary as Record<string, unknown>) ?? {}
+
+  // Compute total_overlaps from data if not provided
+  const overlapPairs = new Set<string>()
+  for (const req of requirements) {
+    for (const other of req.overlap_with) {
+      const key = [req.id, other].sort().join('|')
+      overlapPairs.add(key)
+    }
+  }
+
   return {
     refining_id:     (r.refining_id as string) ?? '',
-    feature:         (r.feature as string) ?? '',
-    source_file:     (r.source_file as string) ?? 'input',
-    pipeline_status: (r.pipeline_status as RefinementResult['pipeline_status']) ?? { status: 'ready', reason: '', blocked_by: [] },
+    feature:         (r.feature as string) ?? undefined,
+    source_file:     (r.source_file as string) ?? undefined,
+    generated_at:    (r.generated_at as string) ?? undefined,
+    pipeline_status: (r.pipeline_status as RefinementResult['pipeline_status']) ?? { status: 'ready', reason: null, blocked_by: [] },
     summary: {
-      total_raw:       (summary.total_raw as number)       ?? requirements.length,
-      total_refined:   (summary.total_refined as number)   ?? requirements.length,
-      total_removed:   (summary.total_removed as number)   ?? 0,
-      total_conflicts: (summary.total_conflicts as number) ?? 0,
-      total_overlaps:  (summary.total_overlaps as number)  ?? 0,
+      total_raw:        (summary.total_raw as number)        ?? (requirements.length + incomplete.length),
+      total_valid:      (summary.total_valid as number)      ?? requirements.length,
+      total_incomplete: (summary.total_incomplete as number) ?? incomplete.length,
+      total_removed:    (summary.total_removed as number)    ?? 0,
+      total_conflicts:  (summary.total_conflicts as number)  ?? 0,
+      total_overlaps:   (summary.total_overlaps as number)   ?? overlapPairs.size,
     },
     requirements,
+    incomplete,
     removed:   (r.removed as RefinementResult['removed'])     ?? [],
-    conflicts: (r.conflicts as RefinementResult['conflicts'])  ?? [],
+    conflicts: (r.conflicts as RefinementResult['conflicts']) ?? [],
   }
 }
 
@@ -162,8 +184,10 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
       try {
         const stored = localStorage.getItem('veridian-pipelines')
         let pipelines = stored ? JSON.parse(stored) : {}
-        // Seed demo conversation for first-time users
-        if (!pipelines['conv-1']) {
+        // Reseed demo conv-1 if missing or using stale (pre-incomplete) shape
+        const existing = pipelines['conv-1']
+        const isStale = existing?.nlpResult && !('incomplete' in existing.nlpResult)
+        if (!existing || isStale) {
           pipelines['conv-1'] = MOCK_DEMO_PIPELINE
         }
         set({ pipelines, hasHydrated: true })

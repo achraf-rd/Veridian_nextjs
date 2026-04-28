@@ -45,6 +45,10 @@ export default function RequirementsReviewPage() {
   const effectiveConflicts = (data?.summary.total_conflicts ?? 0) - resolvedConflictIds.size
   const isReady = effectiveConflicts === 0
   const totalScenarios = data?.requirements.reduce((sum, r) => sum + r.num_scenarios, 0) ?? 0
+  const allReqs = useMemo(
+    () => [...(data?.requirements ?? []), ...(data?.incomplete ?? [])],
+    [data?.requirements, data?.incomplete],
+  )
 
   const activeConflict = useMemo(() => {
     if (!data) return null
@@ -63,7 +67,7 @@ export default function RequirementsReviewPage() {
     return new Set(activeConflict.requirements)
   }, [activeConflict])
 
-  const selectedReq = data?.requirements.find((r) => r.id === selectedReqId) ?? null
+  const selectedReq = allReqs.find((r) => r.id === selectedReqId) ?? null
 
   if (!data) {
     return (
@@ -130,12 +134,16 @@ export default function RequirementsReviewPage() {
         </button>
 
         <nav className="flex items-center gap-1.5 text-xs text-vrd-text-muted min-w-0 flex-1">
+          {data.feature && (
+            <>
+              <span className="hover:text-vrd-text transition-colors cursor-pointer truncate">
+                {data.feature}
+              </span>
+              <ChevronRight className="w-3 h-3 flex-shrink-0" />
+            </>
+          )}
           <span className="hover:text-vrd-text transition-colors cursor-pointer truncate">
-            Renault AEB Suite v2
-          </span>
-          <ChevronRight className="w-3 h-3 flex-shrink-0" />
-          <span className="hover:text-vrd-text transition-colors cursor-pointer truncate">
-            {data.source_file} — {data.summary.total_raw} reqs
+            {data.source_file ?? 'input'} — {data.summary.total_raw} reqs
           </span>
           <ChevronRight className="w-3 h-3 flex-shrink-0" />
           <span className="text-vrd-text flex-shrink-0">Review</span>
@@ -164,7 +172,7 @@ export default function RequirementsReviewPage() {
             disabled={!isReady}
             title={
               !isReady
-                ? data.pipeline_status.reason
+                ? data.pipeline_status.reason ?? 'Conflicts must be resolved before continuing'
                 : `Approving will queue ${totalScenarios} scenarios`
             }
             className={cn(isReady && 'animate-pulse-ring')}
@@ -182,6 +190,7 @@ export default function RequirementsReviewPage() {
       <div className="flex-1 flex overflow-hidden min-h-0">
         <RequirementsSidebar
           requirements={data.requirements}
+          incomplete={data.incomplete}
           removed={data.removed}
           restoredIds={restoredIds}
           editedIds={editedIds}
@@ -197,14 +206,14 @@ export default function RequirementsReviewPage() {
             req={selectedReq}
             editedText={editedTexts[selectedReq.id] ?? null}
             conflict={
-              selectedReq.conflict_id
+              selectedReq.status === 'valid' && selectedReq.conflict_id
                 ? data.conflicts.find(
                     (c) => c.conflict_id === selectedReq.conflict_id,
                   ) ?? null
                 : null
             }
             isResolved={
-              selectedReq.conflict_id
+              selectedReq.status === 'valid' && selectedReq.conflict_id
                 ? resolvedConflictIds.has(selectedReq.conflict_id)
                 : false
             }

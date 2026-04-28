@@ -5,12 +5,12 @@ import { cn } from '@/lib/utils'
 import { Badge, Button } from '@/components/ui'
 import type {
   ConflictEntry,
-  RefinedRequirement,
+  ValidRequirement,
 } from '@/types/requirements'
 
 interface Props {
   conflict: ConflictEntry
-  involvedRequirements: RefinedRequirement[]
+  involvedRequirements: ValidRequirement[]
   editedIds: Set<string>
   isResolved: boolean
   isDismissed: boolean
@@ -88,15 +88,8 @@ export default function ConflictPanel({
                     </Badge>
                   )}
                 </div>
-                <p
-                  className={cn(
-                    'text-xs leading-relaxed',
-                    editedIds.has(req.id)
-                      ? 'text-vrd-text'
-                      : 'text-vrd-text',
-                  )}
-                >
-                  {req.refined}
+                <p className="text-xs leading-relaxed text-vrd-text">
+                  {req.original}
                 </p>
               </div>
             ))}
@@ -114,19 +107,21 @@ export default function ConflictPanel({
         </div>
 
         {/* Resolution suggestion */}
-        <div className="rounded-lg border border-warning/30 bg-warning/5 p-3">
-          <div className="flex items-start gap-2">
-            <Lightbulb className="w-3.5 h-3.5 text-warning flex-shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-warning mb-1">
-                Suggested resolution
-              </p>
-              <p className="text-xs text-vrd-text leading-relaxed">
-                {conflict.resolution}
-              </p>
+        {conflict.resolution && (
+          <div className="rounded-lg border border-warning/30 bg-warning/5 p-3">
+            <div className="flex items-start gap-2">
+              <Lightbulb className="w-3.5 h-3.5 text-warning flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-warning mb-1">
+                  Suggested resolution
+                </p>
+                <p className="text-xs text-vrd-text leading-relaxed">
+                  {conflict.resolution}
+                </p>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Resolution progress */}
         {!isResolved && !isDismissed && (

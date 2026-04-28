@@ -67,18 +67,26 @@ The pipeline stages are: **NLP Interpreter → Scenario Generator → Execution 
 
 Each stage produces a card in the thread. Cards are **collapsed by default** — just the headline and action. The engineer clicks to expand for details.
 
-### 5.1 NLP Interpreter card
+### 5.1 NLP Interpreter card (Requirements Refiner)
 
-**Collapsed:**
-> NLP complete — 47 requirements processed, 3 conflicts detected, 2 overlaps flagged.
-> `[Review batch]` `[Expand ▾]`
+**Collapsed (awaiting approval):**
+> Requirements Refiner — 13 valid · 7 incomplete · 1 overlap · ready to generate scenarios.
+> `[Review requirements →]` `[Approve & continue]` `[Expand ▾]`
+
+**Validation model:**
+The agent classifies every input requirement into one of two buckets:
+- **Valid** — the requirement passed all completeness checks and has been classified (HIGH/MEDIUM/LOW complexity), with a scenario count assigned.
+- **Incomplete** — the requirement is missing structured information needed to generate a scenario (e.g. `missing speed`, `missing road type`). The original text is preserved verbatim and listed in a separate `incomplete[]` array, alongside the `issues_found` chips that explain *why* it was flagged.
+
+Nothing is silently rewritten. The agent does not produce a "refined" version — the engineer sees the original text and either accepts it as valid or completes the missing details on incomplete entries. Removed/duplicate detection is a separate downstream concern and lives in its own collapsible section.
 
 **Expanded:**
-- Full list of extracted requirements with their parsed parameters (scenario type, speed, distance, pass/fail criteria extracted from the text)
-- Inline editing — the engineer can adjust any parameter before approving
-- Conflict/overlap summary with a `[Go to review page →]` button (separate review screen, see section 7)
+- 4 metric tiles: **Valid · Incomplete · Conflicts · Overlaps**
+- Valid requirements table — id, badge (valid / conflict / overlap), complexity chip, scenario count, original text
+- Incomplete requirements list (warning-tinted) — id, `issues_found` chips inline, original text
+- Conflict rows (if any) with `[Go to conflict →]` deep link to the requirements review page
 
-**Gate action:** `[Approve & continue]` — pipeline resumes only after explicit approval.
+**Gate action:** `[Approve & continue]` — only enabled when no conflicts are blocking. Incomplete requirements do not block approval (they are skipped from scenario generation), but the engineer is encouraged to complete them on the review page first.
 
 ---
 
@@ -161,17 +169,17 @@ Each round is visually separated by a subtle divider and timestamp. Scrolling up
 
 ---
 
-## 7. Requirements review page (conflict / overlap analysis)
+## 7. Requirements review page (validation analysis)
 
-Accessible from the "Review batch" button on the NLP card. Separate page, not inline.
+Accessible from the "Review requirements →" link on the NLP card. Separate page, not inline. The full design is documented in section 8.1; this section describes the *intent*.
 
-This screen is a dedicated analysis view of the full requirement batch. Content to design later — candidates include:
+This screen is the dedicated analysis view of the full requirement batch. It surfaces three orthogonal concerns:
 
-- Side-by-side conflict view (two conflicting requirements highlighted)
-- List view with conflict / overlap badges per requirement
-- Dependency graph showing relationships between requirements
+1. **Completeness** — which requirements are missing structured information (`incomplete[]`) and what specifically is missing (`issues_found`). The engineer completes these inline.
+2. **Conflicts** — pairs/groups of requirements that contradict each other; both must be edited (or one dismissed) before approval is unblocked.
+3. **Overlaps** — informational, non-blocking. Two requirements that cover similar ground are cross-linked but neither requires action.
 
-The engineer can adjust requirements here and re-approve back to the thread.
+The engineer can edit any requirement here. Approving on this page redirects back to the thread, where the next pipeline card opens.
 
 ---
 
@@ -188,12 +196,31 @@ Every pipeline stage card in the thread has a button that opens a dedicated page
 
 ### 8.1 Requirements review page
 
-Triggered from the NLP Interpreter card. Shows the full requirement batch with conflict and overlap analysis.
+Triggered from the NLP Interpreter card. Shows the full requirement batch with completeness, conflict, and overlap analysis.
 
-- List view with conflict / overlap badges per requirement
-- Side-by-side conflict view for flagged pairs
-- Inline editing of any extracted parameter before approving
-- Global "Approve & continue" redirects back to the thread
+**Layout:** three-column — sidebar (filterable list) · detail pane (selected requirement + edit) · conflict pane (when applicable).
+
+**Sidebar sections:**
+- **Valid (n)** — requirements that passed all checks. Each row shows id, status badge (valid / conflict / overlap / resolved / edited), complexity chip, and a 70-char snippet of the original text.
+- **Incomplete (n)** — collapsible section, warning-tinted. Each row shows the id, an `incomplete` badge, and the comma-separated `issues_found` chips. Editing one of these in the detail pane upgrades it to `edited`.
+- **Removed (n)** — collapsible, dimmed. Each entry has a `[Restore]` action.
+- **Restored** — items the engineer brought back from removed.
+
+**Filters:** All · Valid · Incomplete · Conflict · Overlap.
+
+**Detail pane:**
+- For valid requirements: status header, complexity, scenario count, issues chips (if any), the requirement text block, conflict warning (with suggestion if provided), overlap warning (with cross-links), edit textarea, complexity justification.
+- For incomplete requirements: prominent warning banner explaining "this requirement is incomplete," `issues_found` chips called out, the original text in a warning-tinted block, and an edit textarea labelled "Complete the requirement" — the textarea border and focus ring are warning-colored to make completion the obvious next action. No complexity / scenarios / conflict / overlap sections (those don't apply).
+
+**Conflict pane (only when a conflict requirement is selected):**
+- Header with conflict id, resolved/dismissed/unresolved badge
+- Involved requirements (red-tinted; turn primary-tinted once edited) — show the original text
+- "Why this is a conflict" description
+- Optional "Suggested resolution" tile (only rendered if the backend provides it)
+- Resolution progress checklist
+- Per-requirement edit buttons + `[Dismiss conflict]` (enabled only after both involved requirements have been edited)
+
+**Approval:** Global `[Approve & continue]` is enabled only when `effectiveConflicts === 0`. Incomplete requirements do not block — they are simply not promoted to scenarios. Approving redirects back to the thread.
 ### 8.2 Scenario review page
 
 Triggered from the Scenario Generator card. A file browser with validation context.

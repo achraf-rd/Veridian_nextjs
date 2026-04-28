@@ -1,16 +1,18 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, GitMerge, Info, Save, CheckCircle2 } from 'lucide-react'
+import { AlertTriangle, GitMerge, Info, Save, CheckCircle2, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Badge, Button } from '@/components/ui'
 import type {
+  AnyRequirement,
   ConflictEntry,
-  RefinedRequirement,
+  ValidRequirement,
+  IncompleteRequirement,
 } from '@/types/requirements'
 
 interface Props {
-  req: RefinedRequirement
+  req: AnyRequirement
   editedText: string | null
   conflict: ConflictEntry | null
   isResolved: boolean
@@ -30,13 +32,12 @@ export default function RequirementDetail({
   onJumpToConflict,
   onJumpToRequirement,
 }: Props) {
-  const [draft, setDraft] = useState(editedText ?? req.refined)
+  const [draft, setDraft] = useState(editedText ?? req.original)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Sync draft when req changes or edited text updates externally
   useEffect(() => {
-    setDraft(editedText ?? req.refined)
-  }, [req.id, editedText, req.refined])
+    setDraft(editedText ?? req.original)
+  }, [req.id, editedText, req.original])
 
   useEffect(() => {
     if (autoFocusEdit && textareaRef.current) {
@@ -49,7 +50,9 @@ export default function RequirementDetail({
   }, [autoFocusEdit, req.id])
 
   const hasIssues = req.issues_found.length > 0
-  const hasUnsavedChanges = draft !== (editedText ?? req.refined)
+  const hasUnsavedChanges = draft !== (editedText ?? req.original)
+  const isIncomplete = req.status === 'incomplete'
+  const isValid = req.status === 'valid'
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -60,15 +63,47 @@ export default function RequirementDetail({
             {req.id}
           </span>
           <StatusBadge req={req} isResolved={isResolved} edited={editedText != null} />
-          <ComplexityBadge complexity={req.complexity} />
-          <span className="text-xs text-vrd-text-muted ml-1">
-            {req.num_scenarios}{' '}
-            {req.num_scenarios === 1 ? 'scenario' : 'scenarios'}
-          </span>
+          {isValid && <ComplexityBadge complexity={req.complexity} />}
+          {isValid && (
+            <span className="text-xs text-vrd-text-muted ml-1">
+              {req.num_scenarios}{' '}
+              {req.num_scenarios === 1 ? 'scenario' : 'scenarios'}
+            </span>
+          )}
         </div>
 
-        {/* Issues chips */}
-        {hasIssues && (
+        {/* Incomplete banner */}
+        {isIncomplete && (
+          <div className="rounded-xl border border-warning/30 bg-warning/5 p-4">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-vrd-text font-medium mb-1">
+                  This requirement is incomplete
+                </p>
+                <p className="text-xs text-vrd-text-muted leading-relaxed mb-2">
+                  The agent flagged missing information that prevents this requirement
+                  from generating valid scenarios. Edit the text below to add the
+                  missing details, then save.
+                </p>
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {req.issues_found.map((issue) => (
+                    <span
+                      key={issue}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-warning/15 text-warning border border-warning/30"
+                    >
+                      <Info className="w-3 h-3" />
+                      {issue}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Issues chips for valid (still surfaced if any) */}
+        {isValid && hasIssues && (
           <div className="flex flex-wrap gap-1.5">
             {req.issues_found.map((issue) => (
               <span
@@ -82,19 +117,15 @@ export default function RequirementDetail({
           </div>
         )}
 
-        {/* Diff or single block */}
-        {req.status === 'unchanged' || !hasIssues ? (
-          <SingleTextBlock text={editedText ?? req.refined} edited={editedText != null} />
-        ) : (
-          <DiffBlock
-            original={req.original}
-            refined={editedText ?? req.refined}
-            edited={editedText != null}
-          />
-        )}
+        {/* Requirement text block */}
+        <RequirementBlock
+          text={editedText ?? req.original}
+          edited={editedText != null}
+          incomplete={isIncomplete}
+        />
 
-        {/* Conflict warning */}
-        {req.conflict_flag && conflict && (
+        {/* Conflict warning (valid only) */}
+        {isValid && req.conflict_flag && conflict && (
           <div
             className={cn(
               'rounded-xl border p-4',
@@ -121,10 +152,12 @@ export default function RequirementDetail({
                 <p className="text-sm text-vrd-text leading-relaxed mb-2">
                   {conflict.description}
                 </p>
-                <p className="text-xs text-vrd-text-muted leading-relaxed">
-                  <span className="font-medium">Suggestion: </span>
-                  {conflict.resolution}
-                </p>
+                {conflict.resolution && (
+                  <p className="text-xs text-vrd-text-muted leading-relaxed">
+                    <span className="font-medium">Suggestion: </span>
+                    {conflict.resolution}
+                  </p>
+                )}
                 <button
                   onClick={() => onJumpToConflict(conflict.conflict_id)}
                   className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-hover"
@@ -136,14 +169,14 @@ export default function RequirementDetail({
           </div>
         )}
 
-        {/* Overlap warning */}
-        {req.overlap_with.length > 0 && (
+        {/* Overlap warning (valid only) */}
+        {isValid && req.overlap_with.length > 0 && (
           <div className="rounded-xl border border-warning/30 bg-warning/5 p-4">
             <div className="flex items-start gap-2.5">
               <GitMerge className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-vrd-text font-medium mb-1">
-                  Overlaps with {req.overlap_with.length === 1 ? '' : 'requirements'}{' '}
+                  Overlaps with{' '}
                   {req.overlap_with.map((id, idx) => (
                     <span key={id}>
                       <button
@@ -166,10 +199,15 @@ export default function RequirementDetail({
         )}
 
         {/* Edit field */}
-        <div className="rounded-xl border border-vrd-border bg-vrd-card p-4">
+        <div
+          className={cn(
+            'rounded-xl border bg-vrd-card p-4',
+            isIncomplete ? 'border-warning/30' : 'border-vrd-border',
+          )}
+        >
           <div className="flex items-center justify-between mb-2">
             <label className="text-xs font-medium text-vrd-text-muted uppercase tracking-wide">
-              Edit requirement
+              {isIncomplete ? 'Complete the requirement' : 'Edit requirement'}
             </label>
             {editedText != null && (
               <Badge variant="info" className="text-[10px] py-0">
@@ -181,13 +219,16 @@ export default function RequirementDetail({
             ref={textareaRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            rows={4}
-            className="w-full rounded-lg bg-vrd-bg border border-vrd-border px-3 py-2 text-sm text-vrd-text resize-y focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/40 font-sans leading-relaxed"
+            rows={5}
+            className={cn(
+              'w-full rounded-lg bg-vrd-bg border px-3 py-2 text-sm text-vrd-text resize-y focus:outline-none font-sans leading-relaxed',
+              isIncomplete
+                ? 'border-warning/30 focus:ring-2 focus:ring-warning/40 focus:border-warning/40'
+                : 'border-vrd-border focus:ring-2 focus:ring-primary/40 focus:border-primary/40',
+            )}
           />
           <div className="flex items-center justify-between mt-2.5">
-            <p className="text-[11px] text-vrd-text-dim">
-              {draft.length} characters
-            </p>
+            <p className="text-[11px] text-vrd-text-dim">{draft.length} characters</p>
             <Button
               size="sm"
               onClick={() => onSaveEdit(req.id, draft.trim())}
@@ -199,15 +240,17 @@ export default function RequirementDetail({
           </div>
         </div>
 
-        {/* Complexity justification */}
-        <div className="rounded-xl border border-dashed border-vrd-border bg-vrd-card/40 p-3.5">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-vrd-text-dim mb-1">
-            Complexity justification
-          </p>
-          <p className="text-xs text-vrd-text-muted leading-relaxed">
-            {req.complexity_justification}
-          </p>
-        </div>
+        {/* Complexity justification (valid only) */}
+        {isValid && req.complexity_justification && (
+          <div className="rounded-xl border border-dashed border-vrd-border bg-vrd-card/40 p-3.5">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-vrd-text-dim mb-1">
+              Complexity justification
+            </p>
+            <p className="text-xs text-vrd-text-muted leading-relaxed">
+              {req.complexity_justification}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -218,10 +261,16 @@ function StatusBadge({
   isResolved,
   edited,
 }: {
-  req: RefinedRequirement
+  req: AnyRequirement
   isResolved: boolean
   edited: boolean
 }) {
+  if (req.status === 'incomplete') {
+    if (edited) return <Badge variant="info">edited</Badge>
+    return <Badge variant="warning">incomplete</Badge>
+  }
+
+  // valid
   if (req.conflict_flag) {
     return isResolved ? (
       <Badge variant="success">resolved</Badge>
@@ -231,11 +280,10 @@ function StatusBadge({
   }
   if (req.overlap_with.length > 0) return <Badge variant="warning">overlap</Badge>
   if (edited) return <Badge variant="info">edited</Badge>
-  if (req.status === 'refined') return <Badge variant="info">refined</Badge>
-  return <Badge variant="success">unchanged</Badge>
+  return <Badge variant="success">valid</Badge>
 }
 
-function ComplexityBadge({ complexity }: { complexity: RefinedRequirement['complexity'] }) {
+function ComplexityBadge({ complexity }: { complexity: ValidRequirement['complexity'] }) {
   const tone =
     complexity === 'HIGH' ? 'danger' : complexity === 'MEDIUM' ? 'warning' : 'success'
   return (
@@ -252,58 +300,39 @@ function ComplexityBadge({ complexity }: { complexity: RefinedRequirement['compl
   )
 }
 
-function SingleTextBlock({ text, edited }: { text: string; edited: boolean }) {
+function RequirementBlock({
+  text,
+  edited,
+  incomplete,
+}: {
+  text: string
+  edited: boolean
+  incomplete: boolean
+}) {
   return (
     <div
       className={cn(
         'rounded-xl border p-4',
-        edited ? 'border-primary/30 bg-primary/5' : 'border-vrd-border bg-vrd-card',
+        edited
+          ? 'border-primary/30 bg-primary/5'
+          : incomplete
+            ? 'border-warning/30 bg-warning/5'
+            : 'border-vrd-border bg-vrd-card',
       )}
     >
-      <p className="text-[11px] font-medium uppercase tracking-wide text-vrd-text-dim mb-1.5">
-        {edited ? 'Edited' : 'Refined text'}
-      </p>
-      <p className="text-sm text-vrd-text leading-relaxed">{text}</p>
-    </div>
-  )
-}
-
-function DiffBlock({
-  original,
-  refined,
-  edited,
-}: {
-  original: string
-  refined: string
-  edited: boolean
-}) {
-  return (
-    <div className="grid md:grid-cols-2 gap-3">
-      <div className="rounded-xl border border-vrd-border bg-vrd-card p-4">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-vrd-text-dim mb-1.5">
-          Original
-        </p>
-        <p className="text-sm text-vrd-text-muted leading-relaxed">
-          <span className="decoration-warning decoration-wavy underline underline-offset-4">
-            {original}
-          </span>
-        </p>
-      </div>
-      <div
+      <p
         className={cn(
-          'rounded-xl border p-4',
-          edited ? 'border-primary/40 bg-primary/5' : 'border-primary/30 bg-primary/5',
+          'text-[11px] font-medium uppercase tracking-wide mb-1.5',
+          edited
+            ? 'text-primary'
+            : incomplete
+              ? 'text-warning'
+              : 'text-vrd-text-dim',
         )}
       >
-        <p className="text-[11px] font-medium uppercase tracking-wide text-primary mb-1.5">
-          {edited ? 'Refined + edited' : 'Refined'}
-        </p>
-        <p className="text-sm text-vrd-text leading-relaxed">
-          <span className="decoration-primary decoration-dotted underline underline-offset-4">
-            {refined}
-          </span>
-        </p>
-      </div>
+        {edited ? 'Edited text' : incomplete ? 'Original (incomplete)' : 'Requirement text'}
+      </p>
+      <p className="text-sm text-vrd-text leading-relaxed">{text}</p>
     </div>
   )
 }

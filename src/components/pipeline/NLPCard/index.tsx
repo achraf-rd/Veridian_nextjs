@@ -8,7 +8,7 @@ import {
   ChevronUp,
   CheckCircle2,
   AlertTriangle,
-  GitMerge,
+  AlertCircle,
   Circle,
   Loader2,
 } from 'lucide-react'
@@ -21,11 +21,11 @@ import type { RefinementResult } from '@/types/requirements'
 // ─── Task definitions (mirrors SSE task_name values) ─────────────────────────
 
 const TASKS = [
-  { num: 1, fn: 'clean()',             done: '19 requirements refined' },
-  { num: 2, fn: 'deduplicate()',       done: '1 removed' },
-  { num: 3, fn: 'overlap_detector()',  done: '2 overlaps found' },
-  { num: 4, fn: 'conflict_detector()', done: '1 conflict detected' },
-  { num: 5, fn: 'classifier()',        done: '19 classified  ·  HIGH×4  MED×9  LOW×6' },
+  { num: 1, fn: 'clean()',             done: 'requirements cleaned' },
+  { num: 2, fn: 'completeness_check()', done: 'completeness validated' },
+  { num: 3, fn: 'overlap_detector()',  done: 'overlap analysis done' },
+  { num: 4, fn: 'conflict_detector()', done: 'conflict analysis done' },
+  { num: 5, fn: 'classifier()',        done: 'complexity classified' },
 ] as const
 
 type TaskStatus = 'idle' | 'running' | 'done'
@@ -72,7 +72,7 @@ export default function NLPCard({ state, result }: Props) {
             <p className="text-sm text-vrd-text mt-0.5">
               Approved —{' '}
               <span className="text-vrd-text-muted">
-                {summary?.total_refined ?? 0} requirements · {summary?.total_raw ?? 0} raw input ·{' '}
+                {summary?.total_valid ?? 0} valid · {summary?.total_raw ?? 0} raw input ·{' '}
                 {result?.requirements.reduce((s, r) => s + r.num_scenarios, 0) ?? 0} scenarios queued
               </span>
             </p>
@@ -190,11 +190,11 @@ export default function NLPCard({ state, result }: Props) {
           <div className="flex items-center gap-3 mt-1.5 text-[11px] text-vrd-text-muted font-mono flex-wrap">
             <span>{result.summary.total_raw} raw</span>
             <span className="text-vrd-text-dim">→</span>
-            <span>{result.summary.total_refined} kept</span>
-            {result.summary.total_removed > 0 && (
+            <span className="text-success">{result.summary.total_valid} valid</span>
+            {result.summary.total_incomplete > 0 && (
               <>
                 <span className="text-vrd-text-dim">·</span>
-                <span className="text-warning">{result.summary.total_removed} removed</span>
+                <span className="text-warning">{result.summary.total_incomplete} incomplete</span>
               </>
             )}
             {result.summary.total_conflicts > 0 && (
@@ -226,10 +226,10 @@ export default function NLPCard({ state, result }: Props) {
         <div className="border-t border-vrd-border">
           {/* Metric tiles */}
           <div className="grid grid-cols-4 divide-x divide-vrd-border border-b border-vrd-border">
-            <MetricTile label="Kept"      value={result.summary.total_refined}  tone="neutral" />
-            <MetricTile label="Removed"   value={result.summary.total_removed}   tone={result.summary.total_removed > 0 ? 'warning' : 'neutral'} />
-            <MetricTile label="Conflicts" value={result.summary.total_conflicts} tone={result.summary.total_conflicts > 0 ? 'danger' : 'success'} />
-            <MetricTile label="Overlaps"  value={result.summary.total_overlaps}  tone={result.summary.total_overlaps > 0 ? 'warning' : 'neutral'} />
+            <MetricTile label="Valid"      value={result.summary.total_valid}      tone="success" />
+            <MetricTile label="Incomplete" value={result.summary.total_incomplete} tone={result.summary.total_incomplete > 0 ? 'warning' : 'neutral'} />
+            <MetricTile label="Conflicts"  value={result.summary.total_conflicts}  tone={result.summary.total_conflicts > 0 ? 'danger' : 'success'} />
+            <MetricTile label="Overlaps"   value={result.summary.total_overlaps}   tone={result.summary.total_overlaps > 0 ? 'warning' : 'neutral'} />
           </div>
 
           {/* Conflict rows */}
@@ -268,10 +268,10 @@ export default function NLPCard({ state, result }: Props) {
             </div>
           )}
 
-          {/* Requirements table */}
+          {/* Valid requirements table */}
           <div className="px-4 py-3 max-h-56 overflow-y-auto">
             <p className="text-[11px] font-medium uppercase tracking-wide text-vrd-text-dim mb-2">
-              Refined requirements
+              Valid requirements ({result.requirements.length})
             </p>
             <div className="space-y-1">
               {result.requirements.map((req) => (
@@ -293,12 +293,42 @@ export default function NLPCard({ state, result }: Props) {
                     {req.num_scenarios}×
                   </span>
                   <span className="text-vrd-text-muted flex-1 min-w-0 truncate leading-none group-hover:text-vrd-text transition-colors">
-                    {req.refined}
+                    {req.original}
                   </span>
                 </Link>
               ))}
             </div>
           </div>
+
+          {/* Incomplete requirements */}
+          {result.incomplete.length > 0 && (
+            <div className="px-4 py-3 border-t border-vrd-border max-h-48 overflow-y-auto">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-warning mb-2 flex items-center gap-1.5">
+                <AlertCircle className="w-3 h-3" />
+                Incomplete requirements ({result.incomplete.length})
+              </p>
+              <div className="space-y-1">
+                {result.incomplete.map((req) => (
+                  <Link
+                    key={req.id}
+                    href={`/project/${projectId}/conversation/${convId}/requirements`}
+                    className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs hover:bg-vrd-card-hover transition-colors group bg-warning/5"
+                  >
+                    <span className="font-mono text-[11px] text-vrd-text-dim w-14 flex-shrink-0">
+                      {req.id}
+                    </span>
+                    <Badge variant="warning" className="text-[10px] px-1.5 py-0">incomplete</Badge>
+                    <span className="text-[10px] text-warning flex-shrink-0 truncate max-w-[120px]">
+                      {req.issues_found.join(', ')}
+                    </span>
+                    <span className="text-vrd-text-muted flex-1 min-w-0 truncate leading-none group-hover:text-vrd-text transition-colors">
+                      {req.original}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -333,7 +363,7 @@ export default function NLPCard({ state, result }: Props) {
             disabled={isBlocked}
             title={
               isBlocked
-                ? result.pipeline_status.reason
+                ? result.pipeline_status.reason ?? 'Conflicts must be resolved before continuing'
                 : `Approve — will queue ${totalScenarios} scenarios`
             }
             className={cn(!isBlocked && 'animate-pulse-ring')}
@@ -452,14 +482,12 @@ function MetricTile({
   )
 }
 
-function ReqStatusBadge({ req }: { req: { conflict_flag: boolean; overlap_with: string[]; status: string } }) {
+function ReqStatusBadge({ req }: { req: { conflict_flag: boolean; overlap_with: string[] } }) {
   if (req.conflict_flag)
     return <Badge variant="danger"    className="text-[10px] px-1.5 py-0">conflict</Badge>
   if (req.overlap_with.length > 0)
     return <Badge variant="warning"   className="text-[10px] px-1.5 py-0">overlap</Badge>
-  if (req.status === 'refined')
-    return <Badge variant="info"      className="text-[10px] px-1.5 py-0">refined</Badge>
-  return       <Badge variant="success" className="text-[10px] px-1.5 py-0">ok</Badge>
+  return       <Badge variant="success" className="text-[10px] px-1.5 py-0">valid</Badge>
 }
 
 function ComplexityChip({ complexity }: { complexity: 'HIGH' | 'MEDIUM' | 'LOW' }) {

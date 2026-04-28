@@ -7,7 +7,7 @@ const PROJECTS: Project[] = [
 ]
 
 const CONVERSATIONS: Record<string, Conversation> = {
-  'conv-1': { id: 'conv-1', projectId: 'renault-aeb', title: 'requirements_v2.xlsx — 47 reqs', createdAt: '2026-04-18T09:00:00Z' },
+  'conv-1': { id: 'conv-1', projectId: 'renault-aeb', title: 'lka_requirements_veridian.xlsx — 20 reqs', createdAt: '2026-04-18T09:00:00Z' },
   'conv-2': { id: 'conv-2', projectId: 'renault-aeb', title: 'highway_edge_cases.md — 12 reqs', createdAt: '2026-04-19T14:30:00Z' },
   'conv-3': { id: 'conv-3', projectId: 'bmw-lka', title: 'lka_baseline.xlsx — 31 reqs', createdAt: '2026-04-20T11:00:00Z' },
 }

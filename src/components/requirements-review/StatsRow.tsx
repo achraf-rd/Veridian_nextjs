@@ -1,6 +1,6 @@
 'use client'
 
-import { FileText, Trash2, AlertTriangle, GitMerge } from 'lucide-react'
+import { CheckCircle2, AlertCircle, AlertTriangle, GitMerge } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { RefinementSummary } from '@/types/requirements'
 
@@ -12,21 +12,21 @@ interface Props {
 export default function StatsRow({ summary, effectiveConflicts }: Props) {
   const conflictTone = effectiveConflicts > 0 ? 'danger' : 'success'
   const overlapTone = summary.total_overlaps > 0 ? 'warning' : 'neutral'
-  const removedTone = summary.total_removed > 0 ? 'warning' : 'neutral'
+  const incompleteTone = summary.total_incomplete > 0 ? 'warning' : 'success'
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
       <StatCard
-        label="Total requirements"
-        value={summary.total_refined}
-        icon={<FileText className="w-4 h-4" />}
-        tone="neutral"
+        label="Valid requirements"
+        value={summary.total_valid}
+        icon={<CheckCircle2 className="w-4 h-4" />}
+        tone="success"
       />
       <StatCard
-        label="Removed (duplicates)"
-        value={summary.total_removed}
-        icon={<Trash2 className="w-4 h-4" />}
-        tone={removedTone}
+        label="Incomplete"
+        value={summary.total_incomplete}
+        icon={<AlertCircle className="w-4 h-4" />}
+        tone={incompleteTone}
       />
       <StatCard
         label="Conflicts"

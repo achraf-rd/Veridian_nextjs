@@ -1,20 +1,22 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { ChevronDown, ChevronRight, RotateCcw } from 'lucide-react'
+import { ChevronDown, ChevronRight, RotateCcw, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui'
 import type {
   Complexity,
-  RefinedRequirement,
+  ValidRequirement,
+  IncompleteRequirement,
   RemovedRequirement,
   RequirementStatus,
 } from '@/types/requirements'
 
-type Filter = 'all' | 'conflict' | 'overlap' | 'refined' | 'ok'
+type Filter = 'all' | 'valid' | 'incomplete' | 'conflict' | 'overlap'
 
 interface Props {
-  requirements: RefinedRequirement[]
+  requirements: ValidRequirement[]
+  incomplete: IncompleteRequirement[]
   removed: RemovedRequirement[]
   restoredIds: Set<string>
   editedIds: Set<string>
@@ -27,14 +29,15 @@ interface Props {
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: 'all', label: 'All' },
+  { key: 'valid', label: 'Valid' },
+  { key: 'incomplete', label: 'Incomplete' },
   { key: 'conflict', label: 'Conflict' },
   { key: 'overlap', label: 'Overlap' },
-  { key: 'refined', label: 'Refined' },
-  { key: 'ok', label: 'OK' },
 ]
 
 export default function RequirementsSidebar({
   requirements,
+  incomplete,
   removed,
   restoredIds,
   editedIds,
@@ -46,17 +49,25 @@ export default function RequirementsSidebar({
 }: Props) {
   const [filter, setFilter] = useState<Filter>('all')
   const [removedOpen, setRemovedOpen] = useState(false)
+  const [incompleteOpen, setIncompleteOpen] = useState(true)
 
-  const visibleRequirements = useMemo(() => {
+  const visibleValid = useMemo(() => {
     return requirements.filter((r) => {
       if (filter === 'all') return true
+      if (filter === 'valid') return true
       if (filter === 'conflict') return r.conflict_flag
       if (filter === 'overlap') return r.overlap_with.length > 0
-      if (filter === 'refined') return r.status === 'refined'
-      if (filter === 'ok') return r.status === 'unchanged'
-      return true
+      return false
     })
   }, [requirements, filter])
+
+  const visibleIncomplete = useMemo(() => {
+    if (filter === 'all' || filter === 'incomplete') return incomplete
+    return []
+  }, [incomplete, filter])
+
+  const totalShown = visibleValid.length + visibleIncomplete.length
+  const totalAll = requirements.length + incomplete.length
 
   const activeRemoved = removed.filter((r) => !restoredIds.has(r.id))
 
@@ -81,27 +92,68 @@ export default function RequirementsSidebar({
           ))}
         </div>
         <p className="mt-2 text-[11px] text-vrd-text-dim">
-          {visibleRequirements.length} of {requirements.length} shown
+          {totalShown} of {totalAll} shown
         </p>
       </div>
 
       {/* List */}
       <div className="flex-1 overflow-y-auto">
-        <ul className="p-2 space-y-1">
-          {visibleRequirements.map((req) => (
-            <RequirementRow
-              key={req.id}
-              req={req}
-              isSelected={selectedReqId === req.id}
-              isHighlighted={highlightedReqIds.has(req.id)}
-              isEdited={editedIds.has(req.id)}
-              isResolved={
-                req.conflict_id != null && resolvedConflictIds.has(req.conflict_id)
-              }
-              onClick={() => onSelectRequirement(req.id)}
-            />
-          ))}
-        </ul>
+        {/* Valid section */}
+        {visibleValid.length > 0 && (
+          <>
+            <p className="px-3 pt-2.5 pb-1.5 text-[11px] font-medium uppercase tracking-wide text-vrd-text-dim">
+              Valid ({visibleValid.length})
+            </p>
+            <ul className="px-2 space-y-1">
+              {visibleValid.map((req) => (
+                <ValidRow
+                  key={req.id}
+                  req={req}
+                  isSelected={selectedReqId === req.id}
+                  isHighlighted={highlightedReqIds.has(req.id)}
+                  isEdited={editedIds.has(req.id)}
+                  isResolved={
+                    req.conflict_id != null && resolvedConflictIds.has(req.conflict_id)
+                  }
+                  onClick={() => onSelectRequirement(req.id)}
+                />
+              ))}
+            </ul>
+          </>
+        )}
+
+        {/* Incomplete section */}
+        {visibleIncomplete.length > 0 && (
+          <div className="border-t border-vrd-border mt-2">
+            <button
+              onClick={() => setIncompleteOpen((v) => !v)}
+              className="w-full flex items-center justify-between px-3 py-2.5 text-xs font-medium text-warning hover:bg-vrd-card-hover transition-colors"
+            >
+              <span className="flex items-center gap-1.5">
+                {incompleteOpen ? (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                )}
+                <AlertCircle className="w-3.5 h-3.5" />
+                Incomplete ({visibleIncomplete.length})
+              </span>
+            </button>
+            {incompleteOpen && (
+              <ul className="px-2 space-y-1 pb-2">
+                {visibleIncomplete.map((req) => (
+                  <IncompleteRow
+                    key={req.id}
+                    req={req}
+                    isSelected={selectedReqId === req.id}
+                    isEdited={editedIds.has(req.id)}
+                    onClick={() => onSelectRequirement(req.id)}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         {/* Removed collapsible */}
         {activeRemoved.length > 0 && (
@@ -149,7 +201,6 @@ export default function RequirementsSidebar({
           </div>
         )}
 
-        {/* Restored items section */}
         {removed.some((r) => restoredIds.has(r.id)) && (
           <div className="border-t border-vrd-border">
             <p className="px-3 pt-2.5 pb-1.5 text-[11px] font-medium uppercase tracking-wide text-vrd-text-dim">
@@ -180,7 +231,7 @@ export default function RequirementsSidebar({
   )
 }
 
-function RequirementRow({
+function ValidRow({
   req,
   isSelected,
   isHighlighted,
@@ -188,7 +239,7 @@ function RequirementRow({
   isResolved,
   onClick,
 }: {
-  req: RefinedRequirement
+  req: ValidRequirement
   isSelected: boolean
   isHighlighted: boolean
   isEdited: boolean
@@ -198,7 +249,7 @@ function RequirementRow({
   const dotColor = statusDotColor(req, isResolved)
   const complexityTone = complexityToneClass(req.complexity)
   const snippet =
-    req.refined.length > 70 ? req.refined.slice(0, 70).trim() + '…' : req.refined
+    req.original.length > 70 ? req.original.slice(0, 70).trim() + '…' : req.original
 
   return (
     <li>
@@ -213,43 +264,25 @@ function RequirementRow({
               : 'border-transparent hover:bg-vrd-card-hover',
         )}
       >
-        {/* Status dot */}
-        <span
-          className={cn(
-            'mt-1.5 w-2 h-2 rounded-full flex-shrink-0',
-            dotColor,
-          )}
-        />
+        <span className={cn('mt-1.5 w-2 h-2 rounded-full flex-shrink-0', dotColor)} />
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-0.5">
-            <span className="font-mono text-[11px] text-vrd-text-muted">
-              {req.id}
-            </span>
+            <span className="font-mono text-[11px] text-vrd-text-muted">{req.id}</span>
             {isEdited && (
-              <Badge variant="info" className="text-[10px] px-1.5 py-0">
-                edited
-              </Badge>
+              <Badge variant="info" className="text-[10px] px-1.5 py-0">edited</Badge>
             )}
             {req.conflict_flag && !isResolved && (
-              <Badge variant="danger" className="text-[10px] px-1.5 py-0">
-                conflict
-              </Badge>
+              <Badge variant="danger" className="text-[10px] px-1.5 py-0">conflict</Badge>
             )}
             {req.conflict_flag && isResolved && (
-              <Badge variant="success" className="text-[10px] px-1.5 py-0">
-                resolved
-              </Badge>
+              <Badge variant="success" className="text-[10px] px-1.5 py-0">resolved</Badge>
             )}
             {req.overlap_with.length > 0 && (
-              <Badge variant="warning" className="text-[10px] px-1.5 py-0">
-                overlap
-              </Badge>
+              <Badge variant="warning" className="text-[10px] px-1.5 py-0">overlap</Badge>
             )}
           </div>
-          <p className="text-xs text-vrd-text line-clamp-2 leading-snug">
-            {snippet}
-          </p>
+          <p className="text-xs text-vrd-text line-clamp-2 leading-snug">{snippet}</p>
         </div>
 
         <span
@@ -265,10 +298,57 @@ function RequirementRow({
   )
 }
 
-function statusDotColor(req: RefinedRequirement, isResolved: boolean): string {
+function IncompleteRow({
+  req,
+  isSelected,
+  isEdited,
+  onClick,
+}: {
+  req: IncompleteRequirement
+  isSelected: boolean
+  isEdited: boolean
+  onClick: () => void
+}) {
+  const snippet =
+    req.original.length > 70 ? req.original.slice(0, 70).trim() + '…' : req.original
+
+  return (
+    <li>
+      <button
+        onClick={onClick}
+        className={cn(
+          'w-full text-left px-2.5 py-2 rounded-lg border transition-colors flex items-start gap-2',
+          isSelected
+            ? 'border-warning/60 bg-warning/10'
+            : 'border-transparent hover:bg-vrd-card-hover',
+        )}
+      >
+        <span className="mt-1.5 w-2 h-2 rounded-full flex-shrink-0 bg-warning" />
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <span className="font-mono text-[11px] text-vrd-text-muted">{req.id}</span>
+            {isEdited ? (
+              <Badge variant="info" className="text-[10px] px-1.5 py-0">edited</Badge>
+            ) : (
+              <Badge variant="warning" className="text-[10px] px-1.5 py-0">incomplete</Badge>
+            )}
+          </div>
+          <p className="text-xs text-vrd-text line-clamp-2 leading-snug">{snippet}</p>
+          {req.issues_found.length > 0 && (
+            <p className="text-[10px] text-warning mt-0.5 truncate">
+              {req.issues_found.join(' · ')}
+            </p>
+          )}
+        </div>
+      </button>
+    </li>
+  )
+}
+
+function statusDotColor(req: ValidRequirement, isResolved: boolean): string {
   if (req.conflict_flag && !isResolved) return 'bg-danger'
   if (req.overlap_with.length > 0) return 'bg-warning'
-  if (req.status === 'refined') return 'bg-primary'
   return 'bg-success'
 }
 
