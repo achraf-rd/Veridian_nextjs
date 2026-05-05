@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import { Bot } from 'lucide-react'
 import { usePipelineStore } from '@/stores/pipelineStore'
+import { useProjectStore } from '@/stores/projectStore'
 import Composer from '@/components/composer'
 import NLPCard from '@/components/pipeline/NLPCard'
 import ScenarioCard from '@/components/pipeline/ScenarioCard'
@@ -63,12 +64,32 @@ export default function ThreadPage() {
   const params = useParams() as { conversationId?: string } | null
   const convId = params?.conversationId ?? ''
   const { getPipeline, hasHydrated, hydrate } = usePipelineStore()
+  const { conversations, renameConversation } = useProjectStore()
+  const renamedRef = useRef(false)
 
   useEffect(() => {
-    hydrate()
-  }, [hydrate])
+    if (convId) hydrate(convId)
+  }, [convId, hydrate])
 
   const pipeline = getPipeline(convId)
+
+  // Auto-name the conversation from the first requirement when NLP starts (once per conv)
+  useEffect(() => {
+    if (
+      pipeline.nlp === 'processing' &&
+      pipeline.round === 1 &&
+      pipeline.engineerInput &&
+      !renamedRef.current
+    ) {
+      renamedRef.current = true
+      const conv = conversations[convId]
+      const currentTitle = conv?.title ?? ''
+      const autoTitle = pipeline.engineerInput.split('\n')[0]?.slice(0, 60) ?? ''
+      if (autoTitle && (currentTitle === 'New conversation' || currentTitle === autoTitle)) {
+        renameConversation(convId, autoTitle)
+      }
+    }
+  }, [pipeline.nlp, pipeline.round]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Until localStorage has been read on the client, render the SSR-matching
   // empty-stage shell so hydration doesn't diverge.

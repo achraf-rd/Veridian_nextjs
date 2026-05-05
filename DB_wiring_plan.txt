@@ -1,0 +1,290 @@
+Veridian — Production-Ready Plan: Postgres + Auth + Full Backend
+
+ Context
+
+ The app currently runs entirely on mocked data (hardcoded stores, localStorage). This plan makes it production-ready using Postgres
+  (via Prisma), NextAuth.js for auth, and real API routes for all data operations. Backend stays in Next.js — no NestJS. CARLA
+ execution can be streamed via SSE (same pattern as the existing refine/stream proxy).
+
+ ---
+ What Gets Built
+
+ ┌─────────────────┬──────────────────────────────┬───────────────────────────────────────────────────────────┐
+ │      Area       │        Current State         │                       Target State                        │
+ ├─────────────────┼──────────────────────────────┼───────────────────────────────────────────────────────────┤
+ │ Auth            │ UI pages only, no backend    │ NextAuth v5, credentials, JWT, bcrypt                     │
+ ├─────────────────┼──────────────────────────────┼───────────────────────────────────────────────────────────┤
+ │ Projects        │ Hardcoded in projectStore.ts │ Postgres, per-user, CRUD API                              │
+ ├─────────────────┼──────────────────────────────┼───────────────────────────────────────────────────────────┤
+ │ Conversations   │ Hardcoded in projectStore.ts │ Postgres, per-project, CRUD API                           │
+ ├─────────────────┼──────────────────────────────┼───────────────────────────────────────────────────────────┤
+ │ Pipeline state  │ Zustand + localStorage       │ JSONB column on Conversation, synced on every gate action │
+ ├─────────────────┼──────────────────────────────┼───────────────────────────────────────────────────────────┤
+ │ CARLA streaming │ MOCK_LOGS                    │ SSE proxy route (same as /api/refine/stream)              │
+ └─────────────────┴──────────────────────────────┴───────────────────────────────────────────────────────────┘
+
+ ---
+ Packages to Install
+
+ npm install prisma @prisma/client
+ npm install next-auth@beta @auth/prisma-adapter
+ npm install bcryptjs
+ npm install --save-dev @types/bcryptjs
+ npx prisma init --datasource-provider postgresql
+
+ No new services. No NestJS.
+
+ ---
+ Phase 1 — Postgres Schema (Prisma)
+
+ File to create: prisma/schema.prisma
+
+ generator client {
+   provider = "prisma-client-js"
+ }
+
+ datasource db {
+   provider = "postgresql"
+   url      = env("DATABASE_URL")
+ }
+
+ model User {
+   id           String    @id @default(cuid())
+   email        String    @unique
+   password     String    // bcrypt hash
+   name         String?
+   organization String?
+   role         String?   // e.g. "ADAS Validation Engineer"
+   bio          String?
+   // preferences stored as JSON — no separate table needed for MVP
+   preferences  Json?     // { theme, compactMode, language, timezone }
+   notifications Json?    // { pipelineDone, gateRequired, stageFailed, weeklyDigest, slackWebhookUrl }
+   createdAt    DateTime  @default(now())
+   projects     Project[]
+ }
+
+ model Project {
+   id            String         @id @default(cuid())
+   name          String
+   description   String?
+   userId        String
+   user          User           @relation(fields: [userId], references: [id])
+   conversations Conversation[]
+   createdAt     DateTime       @default(now())
+ }
+
+ model Conversation {
+   id        String   @id @default(cuid())
+   projectId String
+   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+   title     String
+   pipeline  Json?    // Full ConversationPipeline state as JSONB — no normalization needed
+   createdAt DateTime @default(now())
+   updatedAt DateTime @updatedAt
+ }
+
+ Design decision: Pipeline state is stored as a single JSONB column on Conversation. The ConversationPipeline TypeScript type maps
+ directly — no normalization, no extra tables. Simple and sufficient for MVP.
+
+ File to create: src/lib/prisma.ts
+ import { PrismaClient } from '@prisma/client'
+ declare global { var prisma: PrismaClient | undefined }
+ const prisma = globalThis.prisma ?? new PrismaClient()
+ if (process.env.NODE_ENV !== 'production') globalThis.prisma = prisma
+ export default prisma
+
+ Env: Add to .env.local:
+ DATABASE_URL="postgresql://user:password@localhost:5432/veridian"
+
+ ---
+ Phase 2 — Auth (NextAuth v5)
+
+ Files to create/modify:
+
+ src/auth.ts — NextAuth config
+ import NextAuth from 'next-auth'
+ import Credentials from 'next-auth/providers/credentials'
+ import { PrismaAdapter } from '@auth/prisma-adapter'
+ import prisma from '@/lib/prisma'
+ import bcrypt from 'bcryptjs'
+
+ export const { handlers, auth, signIn, signOut } = NextAuth({
+   adapter: PrismaAdapter(prisma),
+   session: { strategy: 'jwt' },
+   providers: [
+     Credentials({
+       async authorize({ email, password }) {
+         const user = await prisma.user.findUnique({ where: { email: email as string } })
+         if (!user) return null
+         const valid = await bcrypt.compare(password as string, user.password)
+         if (!valid) return null
+         return { id: user.id, email: user.email, name: user.name }
+       },
+     }),
+   ],
+   pages: { signIn: '/login' },
+ })
+
+ src/app/api/auth/[...nextauth]/route.ts — NextAuth handler
+ import { handlers } from '@/auth'
+ export const { GET, POST } = handlers
+
+ src/app/api/auth/register/route.ts — User creation
+ // POST: { email, password, name? } → create user, return 201
+ // Hash password with bcrypt(password, 12), check email uniqueness
+
+ src/middleware.ts — Route protection
+ import { auth } from '@/auth'
+ export default auth((req) => {
+   if (!req.auth) return Response.redirect(new URL('/login', req.url))
+ })
+ export const config = { matcher: ['/project/:path*'] }
+
+ Wire existing UI:
+ - src/app/login/page.tsx — call signIn('credentials', { email, password }) on submit
+ - src/app/register/page.tsx — POST to /api/auth/register (fields: name, email, organization, role, password), then signIn
+ - src/components/layout/TopBar/ — show logged-in user name + avatar initials, add sign-out button
+
+ src/app/api/users/me/route.ts — GET (return session user) / PATCH (update profile, preferences, notifications)
+ - Wire to src/app/settings/page.tsx — settings page is UI-only today, needs PATCH calls on each "Save changes" click
+
+ ---
+ Phase 3 — Projects & Conversations CRUD
+
+ API routes to create:
+
+ src/app/api/projects/route.ts
+   GET  → list all projects for the authed user
+   POST → { name, description? } → create project
+
+ src/app/api/projects/[id]/route.ts
+   GET    → get project + its conversations
+   PATCH  → { name?, description? } → update project
+   DELETE → delete project + cascade conversations
+
+ src/app/api/projects/[id]/conversations/route.ts
+   GET  → list conversations for project
+   POST → { title } → create conversation
+
+ src/app/api/conversations/[id]/route.ts
+   GET   → get conversation (with pipeline JSON)
+   PATCH → { title?, pipeline? } → update (used for pipeline state sync)
+
+ All routes: verify session with auth() from @/auth, check project.userId === session.user.id.
+
+ Store migration:
+
+ src/stores/projectStore.ts — Replace hardcoded data with:
+ - hydrate() function that GETs /api/projects on mount
+ - addProject() POSTs to /api/projects then updates local state
+ - addConversation() POSTs to /api/projects/[id]/conversations
+
+ src/stores/pipelineStore.ts — Persist on every gate action:
+ - hydrate(convId) — GET /api/conversations/[id], restore pipeline from conversation.pipeline JSON (replaces localStorage)
+ - After approveNLP, approveScenario, refactor, and on result event received → PATCH /api/conversations/[id] with { pipeline:
+ currentState }
+ - Remove all localStorage.setItem calls
+
+ ---
+ Phase 4 — CARLA Execution Streaming (SSE)
+
+ If/when the Python backend exposes a real CARLA execution stream:
+
+ src/app/api/execution/stream/route.ts — identical pattern to /api/refine/stream/route.ts
+ // POST → proxy SSE stream from Python CARLA backend to browser
+ // Same header forwarding: text/event-stream, no-cache, X-Accel-Buffering: no
+
+ src/services/api.ts — Add streamExecution(convId) generator (same shape as streamRefineRequirements)
+
+ The ExecutionCard reads from this stream instead of MOCK_LOGS.
+
+ For MVP demo: MOCK_LOGS in pipelineStore.ts is sufficient — no streaming needed.
+
+ ---
+ Implementation Order
+
+ 1. Prisma init → define schema → prisma migrate dev → generate client
+ 2. src/lib/prisma.ts — singleton client
+ 3. Auth setup → src/auth.ts, register route, wire login/register pages, middleware
+ 4. Project CRUD routes → update projectStore.ts to call API
+ 5. Conversation CRUD routes → update addConversation, New Conversation flow
+ 6. Pipeline sync → PATCH conversation on every gate approval + result event; replace localStorage hydration with DB fetch
+ 7. TopBar — show session user, sign-out button
+ 8. CARLA stream route — only if Python backend is ready
+
+ ---
+ Critical Files to Modify
+
+ ┌─────────────────────────────────────────┬─────────────────────────────────────────────────────────┐
+ │                  File                   │                         Change                          │
+ ├─────────────────────────────────────────┼─────────────────────────────────────────────────────────┤
+ │ src/stores/projectStore.ts              │ Replace mock data with API calls                        │
+ ├─────────────────────────────────────────┼─────────────────────────────────────────────────────────┤
+ │ src/stores/pipelineStore.ts             │ Replace localStorage with DB PATCH; add hydrate(convId) │
+ ├─────────────────────────────────────────┼─────────────────────────────────────────────────────────┤
+ │ src/app/login/page.tsx                  │ Wire form to signIn('credentials', ...)                 │
+ ├─────────────────────────────────────────┼─────────────────────────────────────────────────────────┤
+ │ src/app/register/page.tsx               │ Wire form to POST /api/auth/register                    │
+ ├─────────────────────────────────────────┼─────────────────────────────────────────────────────────┤
+ │ src/components/layout/TopBar/index.tsx  │ Add user display + sign-out                             │
+ ├─────────────────────────────────────────┼─────────────────────────────────────────────────────────┤
+ │ src/components/layout/Sidebar/index.tsx │ Show loading while projects fetch                       │
+ └─────────────────────────────────────────┴─────────────────────────────────────────────────────────┘
+
+ New Files
+
+ ┌──────────────────────────────────────────────────┬─────────────────────────────────────────────────┐
+ │                       File                       │                     Purpose                     │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ prisma/schema.prisma                             │ DB schema                                       │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/lib/prisma.ts                                │ Prisma singleton                                │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/auth.ts                                      │ NextAuth config                                 │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/middleware.ts                                │ Route protection                                │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/app/api/auth/[...nextauth]/route.ts          │ NextAuth handler                                │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/app/api/auth/register/route.ts               │ User registration                               │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/app/api/users/me/route.ts                    │ Get/update logged-in user profile + preferences │
+ New Files
+
+ ┌──────────────────────────────────────────────────┬─────────────────────────────────────────────────┐
+ │                       File                       │                     Purpose                     │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ prisma/schema.prisma                             │ DB schema                                       │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/lib/prisma.ts                                │ Prisma singleton                                │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/auth.ts                                      │ NextAuth config                                 │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/middleware.ts                                │ Route protection                                │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/app/api/auth/[...nextauth]/route.ts          │ NextAuth handler                                │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/app/api/auth/register/route.ts               │ User registration                               │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/app/api/users/me/route.ts                    │ Get/update logged-in user profile + preferences │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/app/api/projects/route.ts                    │ List + create projects                          │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/app/api/projects/[id]/route.ts               │ Get/update/delete project                       │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/app/api/projects/[id]/conversations/route.ts │ List + create conversations                     │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/app/api/conversations/[id]/route.ts          │ Get/update conversation + pipeline              │
+ ├──────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ src/app/api/execution/stream/route.ts            │ CARLA SSE proxy (Phase 4)                       │
+ └──────────────────────────────────────────────────┴─────────────────────────────────────────────────┘
+
+ ---
+ Verification
+
+ 1. npx prisma studio — confirms tables created correctly
+ 2. Register a user at /register → redirects to app → Postgres User table has the row
+ 3. Create a project via sidebar → shows in sidebar + Postgres Project table
+ 4. Create a conversation, submit requirements → pipeline processes → conversation page reloads fresh (no localStorage) and pipeline
+  state restores from DB
+ 5. Sign out → /login — sign in again → projects and conversations are still there

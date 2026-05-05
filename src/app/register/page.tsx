@@ -3,7 +3,9 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
+import { useRouter } from 'next/navigation'
 import { Eye, EyeOff, ChevronRight } from 'lucide-react'
+import { signIn } from 'next-auth/react'
 import { cn } from '@/lib/utils'
 
 const ROLES = [
@@ -40,9 +42,12 @@ function PasswordStrength({ password }: { password: string }) {
 }
 
 export default function RegisterPage() {
+  const router = useRouter()
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
   const [agreed, setAgreed] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
   const [form, setForm] = useState({
     name: '',
     email: '',
@@ -55,8 +60,63 @@ export default function RegisterPage() {
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((prev) => ({ ...prev, [k]: e.target.value }))
 
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setError('')
+
+    if (form.password !== form.confirm) {
+      setError('Passwords do not match')
+      return
+    }
+
+    if (!form.email || !form.password) {
+      setError('Email and password are required')
+      return
+    }
+
+    setLoading(true)
+
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: form.email,
+          password: form.password,
+          name: form.name || undefined,
+          organization: form.organization,
+          role: form.role,
+        }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        setError(data.error || 'Registration failed')
+        return
+      }
+
+      // Sign in after successful registration
+      const result = await signIn('credentials', {
+        email: form.email,
+        password: form.password,
+        redirect: false,
+      })
+
+      if (result?.error) {
+        setError('Registration successful, but login failed. Please sign in.')
+      } else if (result?.ok) {
+        router.push('/project')
+      }
+    } catch (err) {
+      setError('An error occurred. Please try again.')
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const inputClass =
-    'w-full bg-vrd-bg border border-vrd-border rounded-lg px-3 py-2.5 text-sm text-vrd-text placeholder:text-vrd-text-dim focus:outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/10 transition-all'
+    'w-full bg-vrd-bg border border-vrd-border rounded-lg px-3 py-2.5 text-sm text-vrd-text placeholder:text-vrd-text-dim focus:outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/10 transition-all disabled:opacity-50'
 
   return (
     <div className="min-h-screen bg-vrd-bg flex flex-col items-center justify-center px-4 py-12">
@@ -75,19 +135,26 @@ export default function RegisterPage() {
       <div className="w-full max-w-sm bg-vrd-card border border-vrd-border rounded-2xl p-8 shadow-2xl">
         <div className="mb-6">
           <h1 className="text-xl font-semibold text-vrd-text mb-1">Create account</h1>
-          <p className="text-sm text-vrd-text-muted">Join your Capgemini validation team</p>
+          <p className="text-sm text-vrd-text-muted">Join your validation team</p>
         </div>
 
-        <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
+            {error}
+          </div>
+        )}
+
+        <form className="space-y-4" onSubmit={handleSubmit}>
           {/* Full name */}
           <div className="space-y-1.5">
             <label className="block text-xs font-medium text-vrd-text-muted">Full name</label>
             <input
               type="text"
               autoComplete="name"
-              placeholder="Achraf Rachid"
+              placeholder="John Doe"
               value={form.name}
               onChange={set('name')}
+              disabled={loading}
               className={inputClass}
             />
           </div>
@@ -98,9 +165,11 @@ export default function RegisterPage() {
             <input
               type="email"
               autoComplete="email"
-              placeholder="you@capgemini.com"
+              placeholder="you@example.com"
               value={form.email}
               onChange={set('email')}
+              disabled={loading}
+              required
               className={inputClass}
             />
           </div>
@@ -113,6 +182,7 @@ export default function RegisterPage() {
                 type="text"
                 value={form.organization}
                 onChange={set('organization')}
+                disabled={loading}
                 className={inputClass}
               />
             </div>
@@ -121,6 +191,7 @@ export default function RegisterPage() {
               <select
                 value={form.role}
                 onChange={set('role')}
+                disabled={loading}
                 className={cn(inputClass, 'cursor-pointer')}
               >
                 {ROLES.map((r) => (
@@ -140,6 +211,8 @@ export default function RegisterPage() {
                 placeholder="••••••••••"
                 value={form.password}
                 onChange={set('password')}
+                disabled={loading}
+                required
                 className={cn(inputClass, 'pr-10')}
               />
               <button
@@ -147,6 +220,7 @@ export default function RegisterPage() {
                 tabIndex={-1}
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-vrd-text-dim hover:text-vrd-text-muted transition-colors"
+                disabled={loading}
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
@@ -164,6 +238,8 @@ export default function RegisterPage() {
                 placeholder="••••••••••"
                 value={form.confirm}
                 onChange={set('confirm')}
+                disabled={loading}
+                required
                 className={cn(
                   inputClass,
                   'pr-10',
@@ -175,6 +251,7 @@ export default function RegisterPage() {
                 tabIndex={-1}
                 onClick={() => setShowConfirm(!showConfirm)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-vrd-text-dim hover:text-vrd-text-muted transition-colors"
+                disabled={loading}
               >
                 {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
@@ -190,15 +267,16 @@ export default function RegisterPage() {
               type="checkbox"
               checked={agreed}
               onChange={(e) => setAgreed(e.target.checked)}
+              disabled={loading}
               className="w-3.5 h-3.5 rounded border-vrd-border accent-primary mt-0.5 flex-shrink-0"
             />
             <span className="text-xs text-vrd-text-muted group-hover:text-vrd-text transition-colors leading-relaxed">
               I agree to the{' '}
-              <button type="button" className="text-primary-light hover:text-primary underline underline-offset-2">
+              <button type="button" className="text-primary-light hover:text-primary underline underline-offset-2" disabled={loading}>
                 Terms of Service
               </button>{' '}
               and{' '}
-              <button type="button" className="text-primary-light hover:text-primary underline underline-offset-2">
+              <button type="button" className="text-primary-light hover:text-primary underline underline-offset-2" disabled={loading}>
                 Privacy Policy
               </button>
             </span>
@@ -207,11 +285,11 @@ export default function RegisterPage() {
           {/* Submit */}
           <button
             type="submit"
-            disabled={!agreed}
+            disabled={!agreed || loading}
             className="w-full mt-1 bg-primary hover:bg-primary/90 active:bg-primary/80 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium text-sm py-2.5 rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm shadow-primary/20"
           >
-            Create account
-            <ChevronRight className="w-4 h-4" />
+            {loading ? 'Creating account...' : 'Create account'}
+            {!loading && <ChevronRight className="w-4 h-4" />}
           </button>
         </form>
 

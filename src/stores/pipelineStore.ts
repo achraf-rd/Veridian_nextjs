@@ -165,7 +165,7 @@ function buildAgentMessage(entryStage: 1 | 2): string {
 interface PipelineStore {
   pipelines: Record<string, ConversationPipeline>
   hasHydrated: boolean
-  hydrate: () => void
+  hydrate: (conversationId?: string) => Promise<void>
   getPipeline: (id: string) => ConversationPipeline
   submit: (id: string, requirements: string[], label?: string) => void
   approveNLP: (id: string) => void
@@ -178,20 +178,45 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
     pipelines: {},
     hasHydrated: false,
 
-    hydrate: () => {
+    hydrate: async (conversationId?: string) => {
       if (typeof window === 'undefined') return
-      if (get().hasHydrated) return
       try {
+        if (conversationId) {
+          // Skip if already loaded for this conversation (e.g. set by submit())
+          if (get().pipelines[conversationId] !== undefined) {
+            set({ hasHydrated: true })
+            return
+          }
+          const response = await fetch(`/api/conversations/${conversationId}`)
+          if (response.ok) {
+            const conv = await response.json()
+            const pipeline = conv.pipeline || BLANK
+            set((s) => ({
+              pipelines: { ...s.pipelines, [conversationId]: pipeline },
+              hasHydrated: true,
+            }))
+            return
+          }
+          // API failed — seed blank so the composer shows
+          set((s) => ({
+            pipelines: { ...s.pipelines, [conversationId]: BLANK },
+            hasHydrated: true,
+          }))
+          return
+        }
+
+        // No ID: load all from localStorage once (demo / legacy)
+        if (get().hasHydrated) return
         const stored = localStorage.getItem('veridian-pipelines')
         let pipelines = stored ? JSON.parse(stored) : {}
-        // Reseed demo conv-1 if missing or using stale (pre-incomplete) shape
         const existing = pipelines['conv-1']
         const isStale = existing?.nlpResult && !('incomplete' in existing.nlpResult)
         if (!existing || isStale) {
           pipelines['conv-1'] = MOCK_DEMO_PIPELINE
         }
         set({ pipelines, hasHydrated: true })
-      } catch {
+      } catch (err) {
+        console.error('Error hydrating pipeline:', err)
         set({ hasHydrated: true })
       }
     },
@@ -200,11 +225,10 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
 
   submit: (id, requirements, label) => {
     const engineerInput = label ?? requirements.join('\n')
-    set((s) => {
-      const newState = { pipelines: { ...s.pipelines, [id]: { ...BLANK, stage: 1, nlp: 'processing' as const, engineerInput } } }
-      localStorage.setItem('veridian-pipelines', JSON.stringify(newState.pipelines))
-      return newState as Partial<PipelineStore>
-    })
+    set((s) => ({
+      hasHydrated: true,
+      pipelines: { ...s.pipelines, [id]: { ...BLANK, stage: 1, nlp: 'processing' as const, engineerInput } },
+    }))
 
     ;(async () => {
       const updateProgress = (nodeName: string, patch: Partial<NLPTaskProgress>) => {
@@ -240,17 +264,24 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
               const p = s.pipelines[id]
               if (!p || p.nlp !== 'processing') return s
               const updated = { ...p, nlp: 'awaiting' as const, nlpResult: normalizeResult(event.output), nlpProgress: {} }
-              const pipelines = { ...s.pipelines, [id]: updated }
-              localStorage.setItem('veridian-pipelines', JSON.stringify(pipelines))
-              return { pipelines } as Partial<PipelineStore>
+              return { pipelines: { ...s.pipelines, [id]: updated } }
             })
+
+            // Sync to API after NLP result
+            const p = get().pipelines[id]
+            if (p) {
+              fetch(`/api/conversations/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pipeline: p }),
+              }).catch((err) => console.error('Failed to sync NLP result:', err))
+            }
           } else if (event.type === 'error') {
             set((s) => {
               const p = s.pipelines[id]
               if (!p) return s
-              const pipelines = { ...s.pipelines, [id]: { ...p, nlp: 'failed' as const, nlpProgress: {} } }
-              localStorage.setItem('veridian-pipelines', JSON.stringify(pipelines))
-              return { pipelines } as Partial<PipelineStore>
+              const updated = { ...p, nlp: 'failed' as const, nlpProgress: {} }
+              return { pipelines: { ...s.pipelines, [id]: updated } }
             })
           }
         }
@@ -259,9 +290,8 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
         set((s) => {
           const p = s.pipelines[id]
           if (!p) return s
-          const pipelines = { ...s.pipelines, [id]: { ...p, nlp: 'failed' as const, nlpProgress: {} } }
-          localStorage.setItem('veridian-pipelines', JSON.stringify(pipelines))
-          return { pipelines } as Partial<PipelineStore>
+          const updated = { ...p, nlp: 'failed' as const, nlpProgress: {} }
+          return { pipelines: { ...s.pipelines, [id]: updated } }
         })
       }
     })()
@@ -271,19 +301,38 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
     set((s) => {
       const p = s.pipelines[id]
       if (!p) return s
-      const newState = { pipelines: { ...s.pipelines, [id]: { ...p, nlp: 'approved' as const, stage: 2, scenario: 'processing' as const } } }
-      localStorage.setItem('veridian-pipelines', JSON.stringify(newState.pipelines))
-      return newState as Partial<PipelineStore>
+      const updated = { ...p, nlp: 'approved' as const, stage: 2, scenario: 'processing' as const }
+      return { pipelines: { ...s.pipelines, [id]: updated } }
     })
+
+    // Sync to API
+    const p = get().pipelines[id]
+    if (p) {
+      fetch(`/api/conversations/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pipeline: get().pipelines[id] }),
+      }).catch((err) => console.error('Failed to sync NLP approval:', err))
+    }
+
     setTimeout(() => {
       set((s) => {
         const p = s.pipelines[id]
         if (!p || p.scenario !== 'processing') return s
         const result = p.round > 1 ? SCENARIO_RESULT_V2 : SCENARIO_RESULT
-        const newState = { pipelines: { ...s.pipelines, [id]: { ...p, scenario: 'awaiting' as const, scenarioResult: result } } }
-        localStorage.setItem('veridian-pipelines', JSON.stringify(newState.pipelines))
-        return newState as Partial<PipelineStore>
+        const updated = { ...p, scenario: 'awaiting' as const, scenarioResult: result }
+        return { pipelines: { ...s.pipelines, [id]: updated } }
       })
+
+      // Sync scenario ready state
+      const updated = get().pipelines[id]
+      if (updated) {
+        fetch(`/api/conversations/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pipeline: updated }),
+        }).catch((err) => console.error('Failed to sync scenario ready:', err))
+      }
     }, 2500)
   },
 
@@ -291,32 +340,46 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
     set((s) => {
       const p = s.pipelines[id]
       if (!p) return s
-      const newState = { pipelines: { ...s.pipelines, [id]: { ...p, scenario: 'approved' as const, stage: 3, execution: 'processing' as const } } }
-      localStorage.setItem('veridian-pipelines', JSON.stringify(newState.pipelines))
-      return newState as Partial<PipelineStore>
+      const updated = { ...p, scenario: 'approved' as const, stage: 3, execution: 'processing' as const }
+      return { pipelines: { ...s.pipelines, [id]: updated } }
     })
+
+    // Sync to API
+    const p = get().pipelines[id]
+    if (p) {
+      fetch(`/api/conversations/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pipeline: get().pipelines[id] }),
+      }).catch((err) => console.error('Failed to sync scenario approval:', err))
+    }
+
     setTimeout(() => {
       set((s) => {
         const p = s.pipelines[id]
         if (!p || p.execution !== 'processing') return s
         const logs = p.round > 1 ? MOCK_LOGS_V2 : MOCK_LOGS
         const report = p.round > 1 ? REPORT_RESULT_V2 : REPORT_RESULT
-        const newState = {
-          pipelines: {
-            ...s.pipelines,
-            [id]: {
-              ...p,
-              execution: 'approved' as const,
-              executionResult: { total: p.scenarioResult?.total ?? 47, passed: p.round > 1 ? 51 : 44, failed: p.round > 1 ? 1 : 2, requeued: 1, logs },
-              stage: 4 as const,
-              report: 'awaiting' as const,
-              reportResult: report,
-            },
-          },
+        const updated = {
+          ...p,
+          execution: 'approved' as const,
+          executionResult: { total: p.scenarioResult?.total ?? 47, passed: p.round > 1 ? 51 : 44, failed: p.round > 1 ? 1 : 2, requeued: 1, logs },
+          stage: 4 as const,
+          report: 'awaiting' as const,
+          reportResult: report,
         }
-        localStorage.setItem('veridian-pipelines', JSON.stringify(newState.pipelines))
-        return newState as Partial<PipelineStore>
+        return { pipelines: { ...s.pipelines, [id]: updated } }
       })
+
+      // Sync execution complete state
+      const updated = get().pipelines[id]
+      if (updated) {
+        fetch(`/api/conversations/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pipeline: updated }),
+        }).catch((err) => console.error('Failed to sync execution complete:', err))
+      }
     }, 8000)
   },
 
@@ -354,9 +417,15 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
 
     set((s) => {
       const newState = { pipelines: { ...s.pipelines, [id]: newPipeline } }
-      localStorage.setItem('veridian-pipelines', JSON.stringify(newState.pipelines))
       return newState as Partial<PipelineStore>
     })
+
+    // Sync to API
+    fetch(`/api/conversations/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pipeline: newPipeline }),
+    }).catch((err) => console.error('Failed to sync refactor:', err))
 
     if (entryStage === 1) {
       // Re-run from NLP
@@ -364,10 +433,19 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
         set((s) => {
           const cur = s.pipelines[id]
           if (!cur || cur.nlp !== 'processing') return s
-          const newState = { pipelines: { ...s.pipelines, [id]: { ...cur, nlp: 'awaiting' as const, nlpResult: MOCK_REFINEMENT } } }
-          localStorage.setItem('veridian-pipelines', JSON.stringify(newState.pipelines))
-          return newState as Partial<PipelineStore>
+          const updated = { ...cur, nlp: 'awaiting' as const, nlpResult: MOCK_REFINEMENT }
+          return { pipelines: { ...s.pipelines, [id]: updated } }
         })
+
+        // Sync NLP result
+        const updated = get().pipelines[id]
+        if (updated) {
+          fetch(`/api/conversations/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pipeline: updated }),
+          }).catch((err) => console.error('Failed to sync NLP refactor result:', err))
+        }
       }, 2500)
     } else {
       // Re-run from Scenario Generator
@@ -375,10 +453,19 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
         set((s) => {
           const cur = s.pipelines[id]
           if (!cur || cur.scenario !== 'processing') return s
-          const newState = { pipelines: { ...s.pipelines, [id]: { ...cur, scenario: 'awaiting' as const, scenarioResult: SCENARIO_RESULT_V2 } } }
-          localStorage.setItem('veridian-pipelines', JSON.stringify(newState.pipelines))
-          return newState as Partial<PipelineStore>
+          const updated = { ...cur, scenario: 'awaiting' as const, scenarioResult: SCENARIO_RESULT_V2 }
+          return { pipelines: { ...s.pipelines, [id]: updated } }
         })
+
+        // Sync scenario result
+        const updated = get().pipelines[id]
+        if (updated) {
+          fetch(`/api/conversations/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pipeline: updated }),
+          }).catch((err) => console.error('Failed to sync scenario refactor result:', err))
+        }
       }, 2500)
     }
   },

@@ -14,6 +14,7 @@ type InputMode = 'text' | 'file' | 'connector'
 interface ComposerProps {
   conversationId: string
   centered?: boolean
+  onPendingSubmit?: (requirements: string[], label?: string) => void
 }
 
 const MODELS = [
@@ -29,7 +30,7 @@ const CONNECTORS = [
   { id: 'sharepoint', label: 'SharePoint',    desc: 'Excel requirements files',      icon: FileSpreadsheet },
 ]
 
-export default function Composer({ conversationId, centered }: ComposerProps) {
+export default function Composer({ conversationId, centered, onPendingSubmit }: ComposerProps) {
   const [mode, setMode] = useState<InputMode>('text')
   const [value, setValue] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -94,6 +95,33 @@ export default function Composer({ conversationId, centered }: ComposerProps) {
   const handleSend = async () => {
     if (!canSend) return
 
+    // No conversation yet — extract requirements and hand off to parent
+    if (!conversationId) {
+      if (mode === 'file' && selectedFile) {
+        setIsParsing(true)
+        setFileError(null)
+        try {
+          const form = new FormData()
+          form.append('file', selectedFile)
+          const res = await fetch('/api/parse-file', { method: 'POST', body: form })
+          const json = await res.json() as { requirements?: string[]; error?: string }
+          if (!res.ok || !json.requirements) {
+            setFileError(json.error ?? 'Failed to parse file')
+            return
+          }
+          onPendingSubmit?.(json.requirements, selectedFile.name)
+          clearFile()
+        } finally {
+          setIsParsing(false)
+        }
+      } else {
+        const requirements = value.trim().split('\n').map(l => l.trim()).filter(Boolean)
+        onPendingSubmit?.(requirements)
+        setValue('')
+      }
+      return
+    }
+
     if (isComplete) {
       refactor(conversationId, value.trim())
       setValue('')
@@ -120,7 +148,6 @@ export default function Composer({ conversationId, centered }: ComposerProps) {
       return
     }
 
-    // Text / connector mode
     const requirements = value.trim().split('\n').map(l => l.trim()).filter(Boolean)
     submit(conversationId, requirements)
     setValue('')

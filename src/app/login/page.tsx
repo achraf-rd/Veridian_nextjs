@@ -3,12 +3,42 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
+import { useRouter } from 'next/navigation'
 import { Eye, EyeOff, ChevronRight } from 'lucide-react'
+import { signIn } from 'next-auth/react'
 
 export default function LoginPage() {
+  const router = useRouter()
   const [showPassword, setShowPassword] = useState(false)
   const [remember, setRemember] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
   const [form, setForm] = useState({ email: '', password: '' })
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+
+    try {
+      const result = await signIn('credentials', {
+        email: form.email,
+        password: form.password,
+        redirect: false,
+      })
+
+      if (result?.error) {
+        setError('Invalid email or password')
+      } else if (result?.ok) {
+        router.push('/project')
+      }
+    } catch (err) {
+      setError('An error occurred. Please try again.')
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <div className="min-h-screen bg-vrd-bg flex flex-col items-center justify-center px-4 py-12">
@@ -27,10 +57,16 @@ export default function LoginPage() {
       <div className="w-full max-w-sm bg-vrd-card border border-vrd-border rounded-2xl p-8 shadow-2xl">
         <div className="mb-6">
           <h1 className="text-xl font-semibold text-vrd-text mb-1">Sign in</h1>
-          <p className="text-sm text-vrd-text-muted">Use your Capgemini credentials to continue</p>
+          <p className="text-sm text-vrd-text-muted">Use your credentials to continue</p>
         </div>
 
-        <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
+            {error}
+          </div>
+        )}
+
+        <form className="space-y-4" onSubmit={handleSubmit}>
           {/* Email */}
           <div className="space-y-1.5">
             <label className="block text-xs font-medium text-vrd-text-muted">
@@ -39,10 +75,12 @@ export default function LoginPage() {
             <input
               type="email"
               autoComplete="email"
-              placeholder="you@capgemini.com"
+              placeholder="you@example.com"
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
-              className="w-full bg-vrd-bg border border-vrd-border rounded-lg px-3 py-2.5 text-sm text-vrd-text placeholder:text-vrd-text-dim focus:outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/10 transition-all"
+              disabled={loading}
+              required
+              className="w-full bg-vrd-bg border border-vrd-border rounded-lg px-3 py-2.5 text-sm text-vrd-text placeholder:text-vrd-text-dim focus:outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/10 transition-all disabled:opacity-50"
             />
           </div>
 
@@ -58,7 +96,9 @@ export default function LoginPage() {
                 placeholder="••••••••••"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
-                className="w-full bg-vrd-bg border border-vrd-border rounded-lg px-3 py-2.5 pr-10 text-sm text-vrd-text placeholder:text-vrd-text-dim focus:outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/10 transition-all"
+                disabled={loading}
+                required
+                className="w-full bg-vrd-bg border border-vrd-border rounded-lg px-3 py-2.5 pr-10 text-sm text-vrd-text placeholder:text-vrd-text-dim focus:outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/10 transition-all disabled:opacity-50"
               />
               <button
                 type="button"
@@ -79,7 +119,8 @@ export default function LoginPage() {
                 type="checkbox"
                 checked={remember}
                 onChange={(e) => setRemember(e.target.checked)}
-                className="w-3.5 h-3.5 rounded border-vrd-border accent-primary"
+                disabled={loading}
+                className="w-3.5 h-3.5 rounded border-vrd-border accent-primary disabled:opacity-50"
               />
               <span className="text-xs text-vrd-text-muted group-hover:text-vrd-text transition-colors">
                 Remember me
@@ -87,7 +128,8 @@ export default function LoginPage() {
             </label>
             <button
               type="button"
-              className="text-xs text-primary-light hover:text-primary transition-colors"
+              className="text-xs text-primary-light hover:text-primary transition-colors disabled:opacity-50"
+              disabled={loading}
             >
               Forgot password?
             </button>
@@ -96,10 +138,11 @@ export default function LoginPage() {
           {/* Submit */}
           <button
             type="submit"
-            className="w-full mt-2 bg-primary hover:bg-primary/90 active:bg-primary/80 text-white font-medium text-sm py-2.5 rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm shadow-primary/20"
+            disabled={loading}
+            className="w-full mt-2 bg-primary hover:bg-primary/90 active:bg-primary/80 text-white font-medium text-sm py-2.5 rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Sign in
-            <ChevronRight className="w-4 h-4" />
+            {loading ? 'Signing in...' : 'Sign in'}
+            {!loading && <ChevronRight className="w-4 h-4" />}
           </button>
         </form>
 

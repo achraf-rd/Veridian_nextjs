@@ -1,7 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import {
   ArrowLeft,
   User,
@@ -81,20 +83,64 @@ function Divider() {
 
 // ─── Profile section ─────────────────────────────────────────────────────────
 
-function ProfileSection() {
+function ProfileSection({ userEmail }: { userEmail?: string }) {
   const [form, setForm] = useState({
-    name: 'Achraf Rachid',
-    email: 'achraf.rachid@capgemini.com',
-    title: 'ADAS Validation Engineer',
-    organization: 'Capgemini Engineering',
-    bio: 'Working on ADAS validation pipelines for L2+ autonomous driving systems.',
+    name: '',
+    title: '',
+    organization: '',
+    bio: '',
   })
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
-  const handleSave = () => {
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const res = await fetch('/api/users/me')
+        if (res.ok) {
+          const user = await res.json()
+          setForm({
+            name: user.name || '',
+            title: user.role || '',
+            organization: user.organization || '',
+            bio: user.bio || '',
+          })
+        }
+      } catch (err) {
+        console.error('Failed to load user:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchUser()
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const res = await fetch('/api/users/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: form.name,
+          role: form.title,
+          organization: form.organization,
+          bio: form.bio,
+        }),
+      })
+      if (res.ok) {
+        setSaved(true)
+        setTimeout(() => setSaved(false), 2000)
+      }
+    } catch (err) {
+      console.error('Failed to save profile:', err)
+    } finally {
+      setSaving(false)
+    }
   }
+
+  if (loading) return <div className="text-sm text-vrd-text-muted">Loading...</div>
 
   return (
     <div>
@@ -104,14 +150,20 @@ function ProfileSection() {
       <div className="flex items-center gap-5 mb-8">
         <div className="relative">
           <div className="w-16 h-16 rounded-full bg-primary flex items-center justify-center shadow-lg shadow-primary/20 flex-shrink-0">
-            <span className="text-xl font-semibold text-white select-none">AR</span>
+            <span className="text-xl font-semibold text-white select-none">
+              {(form.name || 'U')
+                .split(' ')
+                .map((n) => n[0])
+                .join('')
+                .toUpperCase()}
+            </span>
           </div>
           <button className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-vrd-card border border-vrd-border flex items-center justify-center hover:bg-vrd-card-hover transition-colors">
             <Camera className="w-3 h-3 text-vrd-text-muted" />
           </button>
         </div>
         <div>
-          <p className="text-sm font-medium text-vrd-text">{form.name}</p>
+          <p className="text-sm font-medium text-vrd-text">{form.name || 'User'}</p>
           <p className="text-xs text-vrd-text-muted">{form.title}</p>
           <button className="text-xs text-primary-light hover:text-primary transition-colors mt-1">
             Change photo
@@ -128,6 +180,7 @@ function ProfileSection() {
               className={input}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
+              disabled={saving}
             />
           </div>
           <div>
@@ -136,6 +189,7 @@ function ProfileSection() {
               className={input}
               value={form.title}
               onChange={(e) => setForm({ ...form, title: e.target.value })}
+              disabled={saving}
             />
           </div>
         </div>
@@ -145,11 +199,11 @@ function ProfileSection() {
           <input
             type="email"
             className={cn(input, 'opacity-60 cursor-not-allowed')}
-            value={form.email}
+            value={userEmail || ''}
             disabled
           />
           <p className="text-[11px] text-vrd-text-dim mt-1">
-            Email is managed by your organization and cannot be changed here.
+            Email is managed by your account and cannot be changed here.
           </p>
         </div>
 
@@ -159,6 +213,7 @@ function ProfileSection() {
             className={input}
             value={form.organization}
             onChange={(e) => setForm({ ...form, organization: e.target.value })}
+            disabled={saving}
           />
         </div>
 
@@ -169,6 +224,7 @@ function ProfileSection() {
             className={cn(input, 'resize-none')}
             value={form.bio}
             onChange={(e) => setForm({ ...form, bio: e.target.value })}
+            disabled={saving}
           />
         </div>
       </div>
@@ -176,12 +232,13 @@ function ProfileSection() {
       <div className="flex items-center gap-3 mt-6">
         <button
           onClick={handleSave}
-          className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/90 text-white text-sm font-medium rounded-lg transition-colors shadow-sm shadow-primary/20"
+          disabled={saving}
+          className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/90 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors shadow-sm shadow-primary/20"
         >
           {saved ? <CheckCircle2 className="w-3.5 h-3.5" /> : null}
-          {saved ? 'Saved!' : 'Save changes'}
+          {saving ? 'Saving...' : saved ? 'Saved!' : 'Save changes'}
         </button>
-        <button className="px-4 py-2 text-sm text-vrd-text-muted hover:text-vrd-text transition-colors">
+        <button className="px-4 py-2 text-sm text-vrd-text-muted hover:text-vrd-text transition-colors" disabled={saving}>
           Cancel
         </button>
       </div>
@@ -509,7 +566,37 @@ function NotificationsSection() {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
+  const { data: session, status } = useSession()
+  const router = useRouter()
   const [active, setActive] = useState<SectionId>('profile')
+
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      router.push('/login')
+    }
+  }, [status, router])
+
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen bg-vrd-bg flex items-center justify-center">
+        <div className="text-vrd-text-muted">Loading...</div>
+      </div>
+    )
+  }
+
+  if (!session?.user) {
+    return null
+  }
+
+  const getInitials = (name: string | undefined | null) => {
+    if (!name) return '?'
+    return name
+      .split(' ')
+      .map((n) => n[0])
+      .join('')
+      .toUpperCase()
+  }
 
   const ActiveSection = {
     profile: ProfileSection,
@@ -522,13 +609,13 @@ export default function SettingsPage() {
     <div className="min-h-screen bg-vrd-bg text-vrd-text">
       {/* Top header */}
       <header className="h-12 flex items-center px-6 border-b border-vrd-border bg-vrd-sidebar flex-shrink-0">
-        <Link
-          href="/project/renault-aeb/conversation/conv-1"
+        <button
+          onClick={() => router.back()}
           className="flex items-center gap-1.5 text-xs text-vrd-text-muted hover:text-vrd-text transition-colors"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           Back to Veridian
-        </Link>
+        </button>
         <div className="flex-1 flex items-center justify-center">
           <div className="flex items-center gap-2">
             <Shield className="w-4 h-4 text-primary" />
@@ -545,11 +632,11 @@ export default function SettingsPage() {
           <div className="px-4 py-5 border-b border-vrd-border">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
-                <span className="text-sm font-semibold text-white">AR</span>
+                <span className="text-sm font-semibold text-white">{getInitials(session.user.name)}</span>
               </div>
               <div className="min-w-0">
-                <p className="text-xs font-medium text-vrd-text truncate">Achraf Rachid</p>
-                <p className="text-[10px] text-vrd-text-dim truncate">ADAS Validation Engineer</p>
+                <p className="text-xs font-medium text-vrd-text truncate">{session.user.name || 'User'}</p>
+                <p className="text-[10px] text-vrd-text-dim truncate">{session.user.email}</p>
               </div>
             </div>
           </div>
@@ -595,7 +682,10 @@ export default function SettingsPage() {
               </p>
             </div>
 
-            <ActiveSection />
+            {active === 'profile' && <ProfileSection userEmail={session.user.email} />}
+            {active === 'security' && <SecuritySection />}
+            {active === 'preferences' && <PreferencesSection />}
+            {active === 'notifications' && <NotificationsSection />}
           </div>
         </main>
       </div>

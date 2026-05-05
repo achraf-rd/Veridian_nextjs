@@ -17,9 +17,11 @@ export default function TopBar() {
   return (
     <header className="flex items-center h-12 px-4 border-b border-vrd-border bg-vrd-sidebar flex-shrink-0 justify-between">
       <nav className="flex items-center gap-1 text-xs text-vrd-text-muted">
-        <span className="hover:text-vrd-text transition-colors cursor-pointer">
-          {project?.name ?? projectId}
-        </span>
+        {project && (
+          <span className="hover:text-vrd-text transition-colors cursor-pointer">
+            {project.name}
+          </span>
+        )}
         {conversation && (
           <>
             <ChevronRight className="w-3 h-3" />
@@ -27,6 +29,7 @@ export default function TopBar() {
           </>
         )}
       </nav>
+
       <ThemeToggle />
     </header>
   )
