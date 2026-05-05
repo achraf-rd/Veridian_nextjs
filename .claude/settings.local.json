@@ -23,7 +23,9 @@
       "Bash(node -e ' *)",
       "Bash(curl -s http://localhost:3000)",
       "Bash(npm list *)",
-      "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\('next:', p.dependencies.next\\)\")"
+      "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\('next:', p.dependencies.next\\)\")",
+      "Bash(node testdb.js)",
+      "Bash(npx prisma *)"
     ]
   }
 }

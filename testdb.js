@@ -9,7 +9,7 @@ if (!connectionString) {
 }
 
 console.log('🔍 Testing database connection...');
-console.log('📍 Connection string:', connectionString.replace(/password[^@]*/, 'password=***'));
+console.log('📍 Connection string:', connectionString);
 
 const client = new Client({
   connectionString,

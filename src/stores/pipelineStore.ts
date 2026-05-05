@@ -227,7 +227,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
     const engineerInput = label ?? requirements.join('\n')
     set((s) => ({
       hasHydrated: true,
-      pipelines: { ...s.pipelines, [id]: { ...BLANK, stage: 1, nlp: 'processing' as const, engineerInput } },
+      pipelines: { ...s.pipelines, [id]: { ...BLANK, stage: 1 as const, nlp: 'processing' as const, engineerInput } },
     }))
 
     ;(async () => {
@@ -301,7 +301,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
     set((s) => {
       const p = s.pipelines[id]
       if (!p) return s
-      const updated = { ...p, nlp: 'approved' as const, stage: 2, scenario: 'processing' as const }
+      const updated = { ...p, nlp: 'approved' as const, stage: 2 as const, scenario: 'processing' as const }
       return { pipelines: { ...s.pipelines, [id]: updated } }
     })
 
@@ -340,7 +340,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
     set((s) => {
       const p = s.pipelines[id]
       if (!p) return s
-      const updated = { ...p, scenario: 'approved' as const, stage: 3, execution: 'processing' as const }
+      const updated = { ...p, scenario: 'approved' as const, stage: 3 as const, execution: 'processing' as const }
       return { pipelines: { ...s.pipelines, [id]: updated } }
     })
 
