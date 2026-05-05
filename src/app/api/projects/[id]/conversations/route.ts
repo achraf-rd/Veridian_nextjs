@@ -57,7 +57,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     }
 
     const conversation = await prisma.conversation.create({
-      data: { title, projectId: id, pipeline: null },
+      data: { title, projectId: id },
     })
 
     return NextResponse.json(conversation, { status: 201 })
