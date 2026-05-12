@@ -20,7 +20,7 @@ export default function RequirementsReviewPage() {
   const convId = params?.conversationId ?? ''
 
   const searchParams = useSearchParams()
-  const roundParam = searchParams.get('round')
+  const roundParam = searchParams?.get('round') ?? null
 
   const { getPipeline } = usePipelineStore()
   const pipeline = getPipeline(convId)
@@ -79,7 +79,6 @@ export default function RequirementsReviewPage() {
   }, [activeConflict])
 
   const selectedReq = allReqs.find((r) => r.id === selectedReqId) ?? null
-  const selectedDuplicate = data.duplicates.find((d) => d.id === selectedReqId) ?? null
 
   if (!data) {
     return (
@@ -88,6 +87,8 @@ export default function RequirementsReviewPage() {
       </div>
     )
   }
+
+  const selectedDuplicate = data.duplicates.find((d) => d.id === selectedReqId) ?? null
 
   const handleSelectRequirement = (id: string) => {
     setSelectedReqId(id)
