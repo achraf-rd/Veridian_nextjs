@@ -22,7 +22,7 @@ import type { RefinementResult } from '@/types/requirements'
 
 const TASKS = [
   { num: 1, fn: 'clean()',             done: 'requirements cleaned' },
-  { num: 2, fn: 'completeness_check()', done: 'completeness validated' },
+  { num: 2, fn: 'duplicates_check()', done: 'duplicates identified' },
   { num: 3, fn: 'overlap_detector()',  done: 'overlap analysis done' },
   { num: 4, fn: 'conflict_detector()', done: 'conflict analysis done' },
   { num: 5, fn: 'classifier()',        done: 'complexity classified' },

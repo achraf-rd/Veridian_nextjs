@@ -55,7 +55,7 @@ export default function RequirementsReviewPage() {
 
   const effectiveConflicts = (data?.summary.total_conflicts ?? 0) - resolvedConflictIds.size
   const isReady = effectiveConflicts === 0
-  const totalScenarios = data?.testable.reduce((sum, r) => sum + r.num_scenarios, 0) ?? 0
+  const totalScenarios = data?.testable?.reduce((sum, r) => sum + r.num_scenarios, 0) ?? 0
   const allReqs = useMemo(
     () => [...(data?.testable ?? []), ...(data?.incomplete ?? [])],
     [data?.testable, data?.incomplete],
@@ -163,12 +163,6 @@ export default function RequirementsReviewPage() {
           </span>
           <ChevronRight className="w-3 h-3 flex-shrink-0" />
           <span className="text-vrd-text flex-shrink-0">Review</span>
-          <span
-            className="ml-auto font-mono text-[11px] text-vrd-text-dim hidden md:inline flex-shrink-0"
-            title={data.refining_id}
-          >
-            id: {data.refining_id.slice(0, 8)}…
-          </span>
         </nav>
 
         {isHistorical ? (
