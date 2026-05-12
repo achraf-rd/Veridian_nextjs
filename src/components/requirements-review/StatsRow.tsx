@@ -1,6 +1,6 @@
 'use client'
 
-import { CheckCircle2, AlertCircle, AlertTriangle, GitMerge } from 'lucide-react'
+import { CheckCircle2, AlertCircle, AlertTriangle, GitMerge, Copy } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { RefinementSummary } from '@/types/requirements'
 
@@ -13,12 +13,13 @@ export default function StatsRow({ summary, effectiveConflicts }: Props) {
   const conflictTone = effectiveConflicts > 0 ? 'danger' : 'success'
   const overlapTone = summary.total_overlaps > 0 ? 'warning' : 'neutral'
   const incompleteTone = summary.total_incomplete > 0 ? 'warning' : 'success'
+  const duplicateTone = summary.total_duplicates > 0 ? 'warning' : 'neutral'
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
       <StatCard
-        label="Valid requirements"
-        value={summary.total_valid}
+        label="Testable"
+        value={summary.total_testable}
         icon={<CheckCircle2 className="w-4 h-4" />}
         tone="success"
       />
@@ -27,6 +28,12 @@ export default function StatsRow({ summary, effectiveConflicts }: Props) {
         value={summary.total_incomplete}
         icon={<AlertCircle className="w-4 h-4" />}
         tone={incompleteTone}
+      />
+      <StatCard
+        label="Duplicates"
+        value={summary.total_duplicates}
+        icon={<Copy className="w-4 h-4" />}
+        tone={duplicateTone}
       />
       <StatCard
         label="Conflicts"

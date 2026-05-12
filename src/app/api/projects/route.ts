@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import prisma from '@/lib/prisma'
 
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   try {
     const session = await auth()
 
@@ -55,6 +55,16 @@ export async function POST(req: NextRequest) {
     })
     if (duplicate) {
       return NextResponse.json({ error: 'A project with this name already exists' }, { status: 409 })
+    }
+
+    // Guard: ensure the user record actually exists (stale JWT after a DB reset would
+    // pass the session check above but fail the FK constraint on project.create).
+    const userExists = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { id: true },
+    })
+    if (!userExists) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     console.log('[POST /api/projects] Creating project:', { name, userId: session.user.id })

@@ -1,9 +1,6 @@
 import type { RefinementResult } from '@/types/requirements'
 
-/**
- * Used by the post-completion refactor flow as a stand-in for a re-run.
- * Same shape as a real backend response but with edits applied.
- */
+/** Used by the post-completion refactor flow as a stand-in for a re-run. */
 export const MOCK_REFINEMENT: RefinementResult = {
   refining_id: 'refactor-mock-001',
   feature: 'LKA',
@@ -11,13 +8,13 @@ export const MOCK_REFINEMENT: RefinementResult = {
   pipeline_status: { status: 'ready', reason: null, blocked_by: [] },
   summary: {
     total_raw: 20,
-    total_valid: 18,
+    total_testable: 18,
     total_incomplete: 2,
-    total_removed: 0,
+    total_duplicates: 0,
     total_conflicts: 0,
     total_overlaps: 1,
   },
-  requirements: [
+  testable: [
     {
       id: 'req-001',
       original:
@@ -87,6 +84,6 @@ export const MOCK_REFINEMENT: RefinementResult = {
       status: 'incomplete',
     },
   ],
-  removed: [],
+  duplicates: [],
   conflicts: [],
 }

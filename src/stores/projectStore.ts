@@ -32,6 +32,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const response = await fetch('/api/projects')
+      if (response.status === 401) {
+        window.location.href = '/login'
+        return
+      }
       if (!response.ok) throw new Error(`Failed to fetch projects: ${response.status}`)
 
       const projects = await response.json()
@@ -96,6 +100,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, description }),
       })
+      if (response.status === 401) {
+        window.location.href = '/login'
+        return
+      }
       if (!response.ok) throw new Error(`Failed to create project: ${response.status}`)
       const raw = await response.json()
       const newProject = { id: raw.id, name: raw.name, conversationIds: [] }

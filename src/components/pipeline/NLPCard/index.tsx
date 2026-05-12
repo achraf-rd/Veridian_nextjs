@@ -46,8 +46,9 @@ export default function NLPCard({ state, result }: Props) {
   const { approveNLP, getPipeline } = usePipelineStore()
   const nlpProgress = getPipeline(convId).nlpProgress ?? {}
 
-  const summary  = result?.summary
-  const isBlocked = result?.pipeline_status?.status === 'blocked'
+  const summary = result?.summary
+  // Only conflicts block the gate — duplicates are informational and never block.
+  const isBlocked = (result?.summary.total_conflicts ?? 0) > 0
 
   // Derive task statuses from live SSE progress, keyed by stageNum
   const getTaskProgress = (taskNum: number) =>
@@ -72,8 +73,8 @@ export default function NLPCard({ state, result }: Props) {
             <p className="text-sm text-vrd-text mt-0.5">
               Approved —{' '}
               <span className="text-vrd-text-muted">
-                {summary?.total_valid ?? 0} valid · {summary?.total_raw ?? 0} raw input ·{' '}
-                {result?.requirements.reduce((s, r) => s + r.num_scenarios, 0) ?? 0} scenarios queued
+                {summary?.total_testable ?? 0} testable · {summary?.total_raw ?? 0} raw input ·{' '}
+                {result?.testable.reduce((s, r) => s + r.num_scenarios, 0) ?? 0} scenarios queued
               </span>
             </p>
           </div>
@@ -143,7 +144,7 @@ export default function NLPCard({ state, result }: Props) {
 
   // ── Awaiting approval ──────────────────────────────────────────────────────
   if (!result) return null
-  const totalScenarios = result.requirements.reduce((s, r) => s + r.num_scenarios, 0)
+  const totalScenarios = result.testable.reduce((s, r) => s + r.num_scenarios, 0)
 
   return (
     <div
@@ -190,11 +191,17 @@ export default function NLPCard({ state, result }: Props) {
           <div className="flex items-center gap-3 mt-1.5 text-[11px] text-vrd-text-muted font-mono flex-wrap">
             <span>{result.summary.total_raw} raw</span>
             <span className="text-vrd-text-dim">→</span>
-            <span className="text-success">{result.summary.total_valid} valid</span>
+            <span className="text-success">{result.summary.total_testable} testable</span>
             {result.summary.total_incomplete > 0 && (
               <>
                 <span className="text-vrd-text-dim">·</span>
                 <span className="text-warning">{result.summary.total_incomplete} incomplete</span>
+              </>
+            )}
+            {result.summary.total_duplicates > 0 && (
+              <>
+                <span className="text-vrd-text-dim">·</span>
+                <span className="text-vrd-text-muted">{result.summary.total_duplicates} duplicates</span>
               </>
             )}
             {result.summary.total_conflicts > 0 && (
@@ -225,9 +232,10 @@ export default function NLPCard({ state, result }: Props) {
       {expanded && (
         <div className="border-t border-vrd-border">
           {/* Metric tiles */}
-          <div className="grid grid-cols-4 divide-x divide-vrd-border border-b border-vrd-border">
-            <MetricTile label="Valid"      value={result.summary.total_valid}      tone="success" />
+          <div className="grid grid-cols-5 divide-x divide-vrd-border border-b border-vrd-border">
+            <MetricTile label="Testable"   value={result.summary.total_testable}   tone="success" />
             <MetricTile label="Incomplete" value={result.summary.total_incomplete} tone={result.summary.total_incomplete > 0 ? 'warning' : 'neutral'} />
+            <MetricTile label="Duplicates" value={result.summary.total_duplicates} tone={result.summary.total_duplicates > 0 ? 'warning' : 'neutral'} />
             <MetricTile label="Conflicts"  value={result.summary.total_conflicts}  tone={result.summary.total_conflicts > 0 ? 'danger' : 'success'} />
             <MetricTile label="Overlaps"   value={result.summary.total_overlaps}   tone={result.summary.total_overlaps > 0 ? 'warning' : 'neutral'} />
           </div>
@@ -268,13 +276,13 @@ export default function NLPCard({ state, result }: Props) {
             </div>
           )}
 
-          {/* Valid requirements table */}
+          {/* Testable requirements table */}
           <div className="px-4 py-3 max-h-56 overflow-y-auto">
             <p className="text-[11px] font-medium uppercase tracking-wide text-vrd-text-dim mb-2">
-              Valid requirements ({result.requirements.length})
+              Testable requirements ({result.testable.length})
             </p>
             <div className="space-y-1">
-              {result.requirements.map((req) => (
+              {result.testable.map((req) => (
                 <Link
                   key={req.id}
                   href={`/project/${projectId}/conversation/${convId}/requirements`}
@@ -487,7 +495,7 @@ function ReqStatusBadge({ req }: { req: { conflict_flag: boolean; overlap_with: 
     return <Badge variant="danger"    className="text-[10px] px-1.5 py-0">conflict</Badge>
   if (req.overlap_with.length > 0)
     return <Badge variant="warning"   className="text-[10px] px-1.5 py-0">overlap</Badge>
-  return       <Badge variant="success" className="text-[10px] px-1.5 py-0">valid</Badge>
+  return       <Badge variant="success" className="text-[10px] px-1.5 py-0">testable</Badge>
 }
 
 function ComplexityChip({ complexity }: { complexity: 'HIGH' | 'MEDIUM' | 'LOW' }) {

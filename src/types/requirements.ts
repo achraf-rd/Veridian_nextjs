@@ -2,7 +2,7 @@ export type RequirementStatus = 'valid' | 'incomplete'
 export type Complexity = 'HIGH' | 'MEDIUM' | 'LOW'
 export type RefinerPipelineStatus = 'blocked' | 'ready'
 
-/** A fully-validated requirement returned in the `requirements[]` array. */
+/** A fully-validated requirement returned in the `testable[]` array. */
 export interface ValidRequirement {
   id: string
   original: string
@@ -27,7 +27,8 @@ export interface IncompleteRequirement {
 /** Convenience union — used by components that handle both kinds. */
 export type AnyRequirement = ValidRequirement | IncompleteRequirement
 
-export interface RemovedRequirement {
+/** A requirement flagged as a duplicate — returned in the `duplicates[]` array. */
+export interface DuplicateRequirement {
   id: string
   original: string
   reason: string
@@ -49,9 +50,9 @@ export interface PipelineStatusEnvelope {
 
 export interface RefinementSummary {
   total_raw: number
-  total_valid: number
+  total_testable: number
   total_incomplete: number
-  total_removed: number
+  total_duplicates: number
   total_conflicts: number
   total_overlaps: number
 }
@@ -63,8 +64,8 @@ export interface RefinementResult {
   generated_at?: string
   pipeline_status: PipelineStatusEnvelope
   summary: RefinementSummary
-  requirements: ValidRequirement[]
+  testable: ValidRequirement[]
   incomplete: IncompleteRequirement[]
-  removed: RemovedRequirement[]
+  duplicates: DuplicateRequirement[]
   conflicts: ConflictEntry[]
 }

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { ConversationPipeline, NLPTaskProgress, ScenarioResult, ExecutionResult, ReportResult, LogLine, PipelineRound } from '@/types/pipeline'
-import type { RefinementResult, ValidRequirement, IncompleteRequirement } from '@/types/requirements'
+import type { RefinementResult, ValidRequirement, IncompleteRequirement, DuplicateRequirement } from '@/types/requirements'
 import { MOCK_REFINEMENT } from '@/components/requirements-review/mockData'
 import { MOCK_DEMO_PIPELINE } from '@/stores/mockData'
 import { streamRefineRequirements } from '@/services/api'
@@ -29,17 +29,29 @@ function normalizeIncompleteRequirement(raw: Record<string, unknown>, index: num
   }
 }
 
+function normalizeDuplicateRequirement(raw: Record<string, unknown>, index: number): DuplicateRequirement {
+  return {
+    id:           (raw.id as string) ?? `req-dup-${index + 1}`,
+    original:     (raw.original as string) ?? '',
+    reason:       (raw.reason as string) ?? 'duplicate',
+    duplicate_of: (raw.duplicate_of as string | undefined) ?? undefined,
+  }
+}
+
 function normalizeResult(raw: unknown): RefinementResult {
   const r = (raw ?? {}) as Record<string, unknown>
-  const rawReqs = (r.requirements as Record<string, unknown>[]) ?? []
+  // Support both old field name (requirements) and new (testable)
+  const rawTestable = ((r.testable ?? r.requirements) as Record<string, unknown>[]) ?? []
   const rawIncomplete = (r.incomplete as Record<string, unknown>[]) ?? []
-  const requirements = rawReqs.map(normalizeValidRequirement)
+  const rawDuplicates = ((r.duplicates ?? r.removed) as Record<string, unknown>[]) ?? []
+  const testable = rawTestable.map(normalizeValidRequirement)
   const incomplete = rawIncomplete.map(normalizeIncompleteRequirement)
+  const duplicates = rawDuplicates.map(normalizeDuplicateRequirement)
   const summary = (r.summary as Record<string, unknown>) ?? {}
 
   // Compute total_overlaps from data if not provided
   const overlapPairs = new Set<string>()
-  for (const req of requirements) {
+  for (const req of testable) {
     for (const other of req.overlap_with) {
       const key = [req.id, other].sort().join('|')
       overlapPairs.add(key)
@@ -53,16 +65,16 @@ function normalizeResult(raw: unknown): RefinementResult {
     generated_at:    (r.generated_at as string) ?? undefined,
     pipeline_status: (r.pipeline_status as RefinementResult['pipeline_status']) ?? { status: 'ready', reason: null, blocked_by: [] },
     summary: {
-      total_raw:        (summary.total_raw as number)        ?? (requirements.length + incomplete.length),
-      total_valid:      (summary.total_valid as number)      ?? requirements.length,
+      total_raw:        (summary.total_raw as number)        ?? (testable.length + incomplete.length),
+      total_testable:   ((summary.total_testable ?? summary.total_valid) as number) ?? testable.length,
       total_incomplete: (summary.total_incomplete as number) ?? incomplete.length,
-      total_removed:    (summary.total_removed as number)    ?? 0,
+      total_duplicates: ((summary.total_duplicates ?? summary.total_removed) as number) ?? duplicates.length,
       total_conflicts:  (summary.total_conflicts as number)  ?? 0,
       total_overlaps:   (summary.total_overlaps as number)   ?? overlapPairs.size,
     },
-    requirements,
+    testable,
     incomplete,
-    removed:   (r.removed as RefinementResult['removed'])     ?? [],
+    duplicates,
     conflicts: (r.conflicts as RefinementResult['conflicts']) ?? [],
   }
 }
@@ -225,10 +237,34 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
 
   submit: (id, requirements, label) => {
     const engineerInput = label ?? requirements.join('\n')
-    set((s) => ({
-      hasHydrated: true,
-      pipelines: { ...s.pipelines, [id]: { ...BLANK, stage: 1 as const, nlp: 'processing' as const, engineerInput } },
-    }))
+    set((s) => {
+      const existing = s.pipelines[id]
+      let priorRounds = existing?.priorRounds ?? []
+      let round = existing?.round ?? 1
+
+      // Freeze current round into history if it has any data, so thread is not lost.
+      if (existing?.nlpResult) {
+        const frozen: PipelineRound = {
+          round: existing.round,
+          completedAt: new Date().toISOString(),
+          engineerInput: existing.engineerInput ?? '',
+          nlpResult: existing.nlpResult,
+          scenarioResult: existing.scenarioResult,
+          executionResult: existing.executionResult,
+          reportResult: existing.reportResult,
+        }
+        priorRounds = [...priorRounds, frozen]
+        round = existing.round + 1
+      }
+
+      return {
+        hasHydrated: true,
+        pipelines: {
+          ...s.pipelines,
+          [id]: { ...BLANK, stage: 1 as const, nlp: 'processing' as const, engineerInput, priorRounds, round },
+        },
+      }
+    })
 
     ;(async () => {
       const updateProgress = (nodeName: string, patch: Partial<NLPTaskProgress>) => {

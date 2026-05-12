@@ -9,13 +9,13 @@ export const MOCK_DEMO_NLP_RESULT: RefinementResult = {
   pipeline_status: { status: 'ready', reason: null, blocked_by: [] },
   summary: {
     total_raw: 20,
-    total_valid: 13,
+    total_testable: 13,
     total_incomplete: 7,
-    total_removed: 0,
+    total_duplicates: 0,
     total_conflicts: 0,
     total_overlaps: 1,
   },
-  requirements: [
+  testable: [
     {
       id: 'req-001',
       original:
@@ -250,7 +250,7 @@ export const MOCK_DEMO_NLP_RESULT: RefinementResult = {
       status: 'incomplete',
     },
   ],
-  removed: [],
+  duplicates: [],
   conflicts: [],
 }
 
