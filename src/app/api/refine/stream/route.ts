@@ -33,10 +33,27 @@ export async function POST(request: NextRequest) {
     return new Response(`Backend error: ${backendResponse.status}`, { status: backendResponse.status })
   }
 
-  return new Response(backendResponse.body, {
+  const reader = backendResponse.body!.getReader()
+
+  const stream = new ReadableStream({
+    async pull(controller) {
+      const { done, value } = await reader.read()
+      if (done) {
+        controller.close()
+        return
+      }
+      controller.enqueue(value)
+    },
+    cancel() {
+      reader.cancel()
+    },
+  })
+
+  return new Response(stream, {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no',
     },
   })

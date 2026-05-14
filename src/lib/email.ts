@@ -1,39 +1,31 @@
 import nodemailer from 'nodemailer'
 
-// Create transporter - using environment variables for SMTP config
-// Fallback to test account if env vars not set (for development)
-let transporter: nodemailer.Transporter | null = null
+function createTransporter() {
+  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_SECURE } = process.env
 
-async function getTransporter() {
-  if (transporter) return transporter
-
-  // If environment variables are set, use them
-  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-    transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    })
-  } else {
-    // Use Ethereal Email for testing (create a test account)
-    const testAccount = await nodemailer.createTestAccount()
-    transporter = nodemailer.createTransport({
-      host: 'smtp.ethereal.email',
-      port: 587,
-      secure: false,
-      auth: {
-        user: testAccount.user,
-        pass: testAccount.pass,
-      },
-    })
-    console.log('Using Ethereal test email account for password resets')
+  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
+    throw new Error(
+      'Email not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS in your environment.'
+    )
   }
 
-  return transporter
+  return nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: parseInt(SMTP_PORT ?? '587'),
+    secure: SMTP_SECURE === 'true',
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
+    pool: true,
+    maxConnections: 5,
+    rateDelta: 20000,
+    rateLimit: 5,
+  })
+}
+
+let _transporter: nodemailer.Transporter | null = null
+
+function getTransporter(): nodemailer.Transporter {
+  if (!_transporter) _transporter = createTransporter()
+  return _transporter
 }
 
 export async function sendPasswordResetEmail(
@@ -41,88 +33,56 @@ export async function sendPasswordResetEmail(
   resetUrl: string,
   userName?: string
 ) {
-  try {
-    const transport = await getTransporter()
+  const transport = getTransporter()
 
-    const mailOptions = {
-      from: process.env.SMTP_FROM || '"Veridian" <noreply@veridian.local>',
-      to: email,
-      subject: 'Reset your Veridian password',
-      html: `
-        <div style="font-family: Inter, sans-serif; max-width: 600px; margin: 0 auto;">
-          <div style="background-color: #0284c7; color: white; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
-            <h1 style="margin: 0; font-size: 24px;">Veridian</h1>
-            <p style="margin: 8px 0 0 0; font-size: 14px;">ADAS Validation Platform</p>
-          </div>
-          
-          <div style="background-color: #f8fafc; padding: 40px 20px; border-radius: 0 0 8px 8px;">
-            <h2 style="color: #09090b; margin-top: 0;">Password Reset Request</h2>
-            
-            <p style="color: #64748b; line-height: 1.6;">
-              ${userName ? `Hi ${userName},` : 'Hi,'}
-            </p>
-            
-            <p style="color: #64748b; line-height: 1.6;">
-              We received a request to reset the password for your Veridian account. 
-              If you didn't make this request, you can safely ignore this email.
-            </p>
-            
-            <p style="color: #64748b; line-height: 1.6;">
-              To reset your password, click the link below:
-            </p>
-            
-            <div style="text-align: center; margin: 30px 0;">
-              <a href="${resetUrl}" style="background-color: #0284c7; color: white; padding: 12px 32px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 500;">
-                Reset Password
-              </a>
-            </div>
-            
-            <p style="color: #94a3b8; font-size: 12px; line-height: 1.6;">
-              Or copy and paste this link in your browser:
-            </p>
-            <p style="color: #0284c7; font-size: 12px; word-break: break-all; margin: 10px 0;">
-              ${resetUrl}
-            </p>
-            
-            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;" />
-            
-            <p style="color: #94a3b8; font-size: 12px; line-height: 1.6;">
-              This password reset link will expire in 1 hour.
-            </p>
-            
-            <p style="color: #94a3b8; font-size: 12px; line-height: 1.6; margin-bottom: 0;">
-              © 2026 Capgemini Engineering · Veridian
-            </p>
-          </div>
+  await transport.sendMail({
+    from: process.env.SMTP_FROM ?? '"Veridian" <noreply@veridian.app>',
+    to: email,
+    subject: 'Reset your Veridian password',
+    html: `
+      <div style="font-family: Inter, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background-color: #0284c7; color: white; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
+          <h1 style="margin: 0; font-size: 24px;">Veridian</h1>
+          <p style="margin: 8px 0 0 0; font-size: 14px;">ADAS Validation Platform</p>
         </div>
-      `,
-      text: `
-Password Reset Request
 
-${userName ? `Hi ${userName},` : 'Hi,'}
+        <div style="background-color: #f8fafc; padding: 40px 20px; border-radius: 0 0 8px 8px;">
+          <h2 style="color: #09090b; margin-top: 0;">Password Reset Request</h2>
 
-We received a request to reset the password for your Veridian account. If you didn't make this request, you can safely ignore this email.
+          <p style="color: #64748b; line-height: 1.6;">
+            ${userName ? `Hi ${userName},` : 'Hi,'}
+          </p>
 
-To reset your password, visit this link:
-${resetUrl}
+          <p style="color: #64748b; line-height: 1.6;">
+            We received a request to reset the password for your Veridian account.
+            If you didn't make this request, you can safely ignore this email.
+          </p>
 
-This link will expire in 1 hour.
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${resetUrl}" style="background-color: #0284c7; color: white; padding: 12px 32px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 500;">
+              Reset Password
+            </a>
+          </div>
 
-© 2026 Capgemini Engineering · Veridian
-      `,
-    }
+          <p style="color: #94a3b8; font-size: 12px; line-height: 1.6;">
+            Or copy and paste this link in your browser:
+          </p>
+          <p style="color: #0284c7; font-size: 12px; word-break: break-all; margin: 10px 0;">
+            ${resetUrl}
+          </p>
 
-    const info = await transport.sendMail(mailOptions)
-    console.log('Password reset email sent:', info.messageId)
+          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;" />
 
-    // For Ethereal test account, log the preview URL
-    if (process.env.NODE_ENV === 'development' && !process.env.SMTP_HOST) {
-      console.log('Preview URL:', nodemailer.getTestMessageUrl(info))
-    }
+          <p style="color: #94a3b8; font-size: 12px; line-height: 1.6;">
+            This link expires in 1 hour. If you didn't request a reset, no action is needed.
+          </p>
 
-    return { success: true, messageId: info.messageId }
-  } catch (error) {
-    console.error('Error sending password reset email:', error)
-    throw new Error('Failed to send password reset email')
-  }
+          <p style="color: #94a3b8; font-size: 12px; line-height: 1.6; margin-bottom: 0;">
+            © 2026 Capgemini Engineering · Veridian
+          </p>
+        </div>
+      </div>
+    `,
+    text: `Password Reset Request\n\n${userName ? `Hi ${userName},` : 'Hi,'}\n\nReset your Veridian password here:\n${resetUrl}\n\nThis link expires in 1 hour.\n\n© 2026 Capgemini Engineering · Veridian`,
+  })
 }

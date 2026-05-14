@@ -1,4 +1,5 @@
 import type { RefinementEvent } from '@/types/pipeline'
+import type { GenerateRequest, GenerateResponse } from '@/types/agent2'
 
 export async function* streamRefineRequirements(
   requirements: string[],
@@ -34,6 +35,16 @@ export async function* streamRefineRequirements(
       }
     }
   }
+}
+
+export async function generateScenarios(payload: GenerateRequest): Promise<GenerateResponse> {
+  const response = await fetch('/api/generate-scenarios', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response.json() as Promise<GenerateResponse>
 }
 
 export async function* streamExecution(

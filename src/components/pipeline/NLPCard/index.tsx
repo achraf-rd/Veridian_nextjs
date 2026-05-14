@@ -21,11 +21,11 @@ import type { RefinementResult } from '@/types/requirements'
 // ─── Task definitions (mirrors SSE task_name values) ─────────────────────────
 
 const TASKS = [
-  { num: 1, fn: 'clean()',             done: 'requirements cleaned' },
-  { num: 2, fn: 'duplicates_check()', done: 'duplicates identified' },
-  { num: 3, fn: 'overlap_detector()',  done: 'overlap analysis done' },
-  { num: 4, fn: 'conflict_detector()', done: 'conflict analysis done' },
-  { num: 5, fn: 'classifier()',        done: 'complexity classified' },
+  { num: 1, name: 'clean',            fn: 'clean()',            done: 'requirements cleaned' },
+  { num: 2, name: 'deduplicate',      fn: 'deduplicate()',      done: 'duplicates identified' },
+  { num: 3, name: 'detect_overlaps',  fn: 'detect_overlaps()',  done: 'overlap analysis done' },
+  { num: 4, name: 'detect_conflicts', fn: 'detect_conflicts()', done: 'conflict analysis done' },
+  { num: 5, name: 'classify',         fn: 'classify()',         done: 'complexity classified' },
 ] as const
 
 type TaskStatus = 'idle' | 'running' | 'done'
@@ -50,12 +50,11 @@ export default function NLPCard({ state, result }: Props) {
   // Only conflicts block the gate — duplicates are informational and never block.
   const isBlocked = (result?.summary.total_conflicts ?? 0) > 0
 
-  // Derive task statuses from live SSE progress, keyed by stageNum
-  const getTaskProgress = (taskNum: number) =>
-    Object.values(nlpProgress).find((p) => p.stageNum === taskNum)
+  // nlpProgress is keyed by event.name — look up directly by task name
+  const getTaskProgress = (taskName: string) => nlpProgress[taskName]
 
-  const getTaskStatus = (taskNum: number): TaskStatus => {
-    const p = getTaskProgress(taskNum)
+  const getTaskStatus = (taskName: string): TaskStatus => {
+    const p = nlpProgress[taskName]
     if (!p) return 'idle'
     return p.status === 'completed' ? 'done' : 'running'
   }
@@ -103,8 +102,8 @@ export default function NLPCard({ state, result }: Props) {
         {/* Task rows */}
         <div className="px-4 py-3 space-y-2.5 font-mono">
           {TASKS.map((task) => {
-            const status = getTaskStatus(task.num)
-            const progress = getTaskProgress(task.num)
+            const status = getTaskStatus(task.name)
+            const progress = getTaskProgress(task.name)
             return (
               <TaskRow
                 key={task.num}

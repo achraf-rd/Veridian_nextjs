@@ -126,13 +126,12 @@ export default function LoginPage() {
                 Remember me
               </span>
             </label>
-            <button
-              type="button"
-              className="text-xs text-primary-light hover:text-primary transition-colors disabled:opacity-50"
-              disabled={loading}
+            <Link
+              href="/forgot-password"
+              className="text-xs text-primary-light hover:text-primary transition-colors disabled:opacity-50 inline-block"
             >
               Forgot password?
-            </button>
+            </Link>
           </div>
 
           {/* Submit */}

@@ -4,7 +4,7 @@ import type { RefinementResult, ValidRequirement, IncompleteRequirement, Duplica
 import type { TestCase } from '@/types/agent2'
 import { MOCK_REFINEMENT } from '@/components/requirements-review/mockData'
 import { MOCK_DEMO_PIPELINE } from '@/stores/mockData'
-import { streamRefineRequirements } from '@/services/api'
+import { streamRefineRequirements, generateScenarios } from '@/services/api'
 
 function normalizeValidRequirement(raw: Record<string, unknown>, index: number): ValidRequirement {
   return {
@@ -77,6 +77,33 @@ function normalizeResult(raw: unknown): RefinementResult {
     incomplete,
     duplicates,
     conflicts: (r.conflicts as RefinementResult['conflicts']) ?? [],
+  }
+}
+
+function normalizeTestCase(raw: Record<string, unknown>, index: number): TestCase {
+  return {
+    scenario_id:         (raw.scenario_id as string)               ?? `TC-${String(index + 1).padStart(3, '0')}`,
+    covers_requirements: (raw.covers_requirements as string[])     ?? [],
+    feature_under_test:  (raw.feature_under_test as string)        ?? '',
+    complexity:          (raw.complexity as TestCase['complexity']) ?? 'MEDIUM',
+    test_phase:          (raw.test_phase as TestCase['test_phase']) ?? 'SIL',
+    tags:                (raw.tags as string[])                    ?? [],
+    description:         (raw.description as string)               ?? '',
+    preconditions:       (raw.preconditions as string[] | undefined),
+    environment:         (raw.environment as TestCase['environment']) ?? { map: 'Town03', weather: 'clear', lighting: 'daylight' },
+    ego_vehicle:         (raw.ego_vehicle as TestCase['ego_vehicle']) ?? { state: 'driving', lane: '1', initial_speed: 50, set_speed: null, parameters: {} },
+    actors:              (raw.actors as TestCase['actors'])         ?? [],
+    'test case':         (raw['test case'] as TestCase['test case']) ?? [],
+    type:                'test_case',
+  }
+}
+
+function testCaseToScenarioFile(tc: TestCase, index: number) {
+  return {
+    id:       `s-${String(index + 1).padStart(3, '0')}`,
+    filename: `${tc.scenario_id}.xosc`,
+    type:     'xosc' as const,
+    warnings: [] as string[],
   }
 }
 
@@ -446,6 +473,52 @@ const REPORT_RESULT_V2: ReportResult = {
   ],
 }
 
+type SetFn = (fn: (s: PipelineStore) => Partial<PipelineStore>) => void
+type GetFn = () => PipelineStore
+
+async function runScenarioGeneration(id: string, set: SetFn, get: GetFn) {
+  const nlpResult = get().pipelines[id]?.nlpResult
+  if (!nlpResult) return
+
+  try {
+    const data = await generateScenarios({
+      refining_id:  nlpResult.refining_id ?? null,
+      feature:      nlpResult.feature     ?? null,
+      requirements: nlpResult.testable    as unknown as Record<string, unknown>[],
+    })
+
+    const testCases = data.scenarios.map(normalizeTestCase)
+    const scenarioResult: ScenarioResult = {
+      total:    data.total_scenarios,
+      warnings: 0,
+      scenarios: testCases.map(testCaseToScenarioFile),
+      testCases,
+    }
+
+    set((s) => {
+      const p = s.pipelines[id]
+      if (!p || p.scenario !== 'processing') return s
+      return { pipelines: { ...s.pipelines, [id]: { ...p, scenario: 'awaiting' as const, scenarioResult } } }
+    })
+  } catch (err) {
+    console.error('[pipeline] Scenario generation failed:', err)
+    set((s) => {
+      const p = s.pipelines[id]
+      if (!p) return s
+      return { pipelines: { ...s.pipelines, [id]: { ...p, scenario: 'failed' as const } } }
+    })
+  }
+
+  const updated = get().pipelines[id]
+  if (updated) {
+    fetch(`/api/conversations/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pipeline: updated }),
+    }).catch((err) => console.error('Failed to sync scenario result:', err))
+  }
+}
+
 const BLANK: ConversationPipeline = {
   stage: 0, round: 1, entryStage: 1, agentMessage: null,
   nlp: 'idle', scenario: 'idle', execution: 'idle', report: 'idle',
@@ -642,25 +715,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
       }).catch((err) => console.error('Failed to sync NLP approval:', err))
     }
 
-    setTimeout(() => {
-      set((s) => {
-        const p = s.pipelines[id]
-        if (!p || p.scenario !== 'processing') return s
-        const result = p.round > 1 ? SCENARIO_RESULT_V2 : SCENARIO_RESULT
-        const updated = { ...p, scenario: 'awaiting' as const, scenarioResult: result }
-        return { pipelines: { ...s.pipelines, [id]: updated } }
-      })
-
-      // Sync scenario ready state
-      const updated = get().pipelines[id]
-      if (updated) {
-        fetch(`/api/conversations/${id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pipeline: updated }),
-        }).catch((err) => console.error('Failed to sync scenario ready:', err))
-      }
-    }, 2500)
+    runScenarioGeneration(id, set, get)
   },
 
   approveScenario: (id) => {
@@ -776,24 +831,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
       }, 2500)
     } else {
       // Re-run from Scenario Generator
-      setTimeout(() => {
-        set((s) => {
-          const cur = s.pipelines[id]
-          if (!cur || cur.scenario !== 'processing') return s
-          const updated = { ...cur, scenario: 'awaiting' as const, scenarioResult: SCENARIO_RESULT_V2 }
-          return { pipelines: { ...s.pipelines, [id]: updated } }
-        })
-
-        // Sync scenario result
-        const updated = get().pipelines[id]
-        if (updated) {
-          fetch(`/api/conversations/${id}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pipeline: updated }),
-          }).catch((err) => console.error('Failed to sync scenario refactor result:', err))
-        }
-      }, 2500)
+      runScenarioGeneration(id, set, get)
     }
   },
   }

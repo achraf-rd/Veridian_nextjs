@@ -1,3 +1,5 @@
+'use client'
+
 import type { TestCase } from '@/types/agent2'
 
 interface Props {
@@ -8,8 +10,11 @@ export default function RequirementsCoverage({ scenarios }: Props) {
   const coverage = new Map<string, number>()
 
   for (const tc of scenarios) {
-    for (const req of tc.covers_requirements) {
-      coverage.set(req, (coverage.get(req) ?? 0) + 1)
+    const reqs = tc.covers_requirements || []
+    if (Array.isArray(reqs)) {
+      for (const req of reqs) {
+        coverage.set(req, (coverage.get(req) ?? 0) + 1)
+      }
     }
   }
 

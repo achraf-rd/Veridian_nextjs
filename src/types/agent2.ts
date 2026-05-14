@@ -28,6 +28,19 @@ export interface TestStep {
   pass_criteria: string
 }
 
+export interface GenerateRequest {
+  refining_id?: string | null
+  feature?: string | null
+  requirements: Record<string, unknown>[]
+}
+
+export interface GenerateResponse {
+  refining_id: string | null
+  feature: string | null
+  total_scenarios: number
+  scenarios: Record<string, unknown>[]
+}
+
 export interface TestCase {
   scenario_id: string
   covers_requirements: string[]
