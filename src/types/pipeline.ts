@@ -1,4 +1,5 @@
 import type { RefinementResult } from '@/types/requirements'
+import type { TestCase } from '@/types/agent2'
 
 export type CardState = 'idle' | 'processing' | 'awaiting' | 'approved' | 'failed'
 
@@ -28,6 +29,7 @@ export interface ScenarioResult {
   total: number
   warnings: number
   scenarios: ScenarioFile[]
+  testCases?: TestCase[]
 }
 
 export interface LogLine {

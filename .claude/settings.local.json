@@ -25,7 +25,11 @@
       "Bash(npm list *)",
       "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\('next:', p.dependencies.next\\)\")",
       "Bash(node testdb.js)",
-      "Bash(npx prisma *)"
+      "Bash(npx prisma *)",
+      "Bash(Get-ChildItem -Path src -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\pc\\\\Desktop\\\\my\\\\pfe2026\\\\project\\\\Veridian_frontend\" -Recurse -Filter \"*requirements*\" -File)",
+      "Bash(Select-Object -ExpandProperty FullName)"
     ]
   }
 }

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ConversationPipeline, NLPTaskProgress, ScenarioResult, ExecutionResult, ReportResult, LogLine, PipelineRound } from '@/types/pipeline'
 import type { RefinementResult, ValidRequirement, IncompleteRequirement, DuplicateRequirement } from '@/types/requirements'
+import type { TestCase } from '@/types/agent2'
 import { MOCK_REFINEMENT } from '@/components/requirements-review/mockData'
 import { MOCK_DEMO_PIPELINE } from '@/stores/mockData'
 import { streamRefineRequirements } from '@/services/api'
@@ -79,6 +80,294 @@ function normalizeResult(raw: unknown): RefinementResult {
   }
 }
 
+const MOCK_TEST_CASES: TestCase[] = [
+  {
+    scenario_id: 'TC-req-001-01',
+    covers_requirements: ['req-001'],
+    feature_under_test: 'AEB pedestrian detection at 50 km/h',
+    complexity: 'MEDIUM',
+    test_phase: 'SIL',
+    tags: ['nominal', 'pedestrian'],
+    description: 'Ego vehicle approaches a crossing pedestrian at 50 km/h; AEB must activate and stop before contact.',
+    preconditions: ['Ego speed stabilized at 50 km/h', 'No prior brake application', 'Clear lane ahead'],
+    environment: { map: 'Town03', weather: 'clear', lighting: 'daylight' },
+    ego_vehicle: { state: 'driving', lane: '1', initial_speed: 50, set_speed: null, parameters: {} },
+    actors: [
+      { id: 'ped-001', type: 'pedestrian', lane: 'crossing', initial_distance: 15, speed: 3, behavior: 'cross_left_to_right' },
+    ],
+    'test case': [
+      { step: 1, action: 'Ego approaches pedestrian at 50 km/h', reaction: 'AEB system pre-charges brakes', pass_criteria: 'TTC ≤ 2.0 s triggers pre-charge' },
+      { step: 2, action: 'AEB applies emergency braking', reaction: 'Vehicle decelerates at ≥ 8 m/s²', pass_criteria: 'Deceleration ≥ 8 m/s²' },
+      { step: 3, action: 'Vehicle comes to full stop', reaction: 'Pedestrian passes unharmed', pass_criteria: 'Stop distance ≤ 12 m from pedestrian' },
+    ],
+    type: 'test_case',
+  },
+  {
+    scenario_id: 'TC-req-002-01',
+    covers_requirements: ['req-002'],
+    feature_under_test: 'AEB city stop — stationary obstacle',
+    complexity: 'LOW',
+    test_phase: 'SIL',
+    tags: ['nominal', 'boundary'],
+    description: 'Ego approaches a stationary vehicle in urban environment at 30 km/h; must stop within 5 m.',
+    preconditions: ['Ego speed at 30 km/h', 'Stationary target vehicle placed 20 m ahead'],
+    environment: { map: 'Town04', weather: 'cloudy', lighting: 'daylight' },
+    ego_vehicle: { state: 'driving', lane: '1', initial_speed: 30, set_speed: 30, parameters: {} },
+    actors: [
+      { id: 'veh-001', type: 'car', lane: '1', initial_distance: 20, speed: 0, behavior: 'stationary' },
+    ],
+    'test case': [
+      { step: 1, action: 'Ego drives at 30 km/h toward stationary car', reaction: 'ADAS detects obstacle', pass_criteria: 'Detection at ≥ 15 m distance' },
+      { step: 2, action: 'AEB triggers emergency stop', reaction: 'Ego decelerates', pass_criteria: 'No collision — ego stops ≤ 5 m from target' },
+    ],
+    type: 'test_case',
+  },
+  {
+    scenario_id: 'TC-req-005-01',
+    covers_requirements: ['req-005'],
+    feature_under_test: 'Lane Keeping Assist — highway drift correction',
+    complexity: 'LOW',
+    test_phase: 'SIL',
+    tags: ['nominal'],
+    description: 'Ego drifts toward lane boundary at 70 km/h; LKA must apply corrective steering within 200 ms.',
+    environment: { map: 'Town06', weather: 'clear', lighting: 'daylight' },
+    ego_vehicle: { state: 'drifting_right', lane: '2', initial_speed: 70, set_speed: 70, parameters: {} },
+    actors: [],
+    'test case': [
+      { step: 1, action: 'Ego begins rightward drift at 70 km/h', reaction: 'LKA detects lane departure', pass_criteria: 'Lane departure detected within 100 ms' },
+      { step: 2, action: 'LKA applies corrective steering torque', reaction: 'Ego returns to lane center', pass_criteria: 'Lateral deviation ≤ 0.3 m from center' },
+    ],
+    type: 'test_case',
+  },
+  {
+    scenario_id: 'TC-req-007-01',
+    covers_requirements: ['req-007'],
+    feature_under_test: 'AEB — bicycle cut-in at intersection',
+    complexity: 'HIGH',
+    test_phase: 'SIL+HIL',
+    tags: ['edge_case', 'boundary'],
+    description: 'Cyclist cuts into ego lane from right at intersection; ego must brake to avoid collision in < 250 ms.',
+    preconditions: ['Ego speed 50 km/h', 'Intersection T-junction', 'Cyclist initially out of sensor range'],
+    environment: { map: 'Town05', weather: 'rain', lighting: 'overcast' },
+    ego_vehicle: { state: 'driving', lane: '1', initial_speed: 50, set_speed: null, parameters: {} },
+    actors: [
+      { id: 'cyc-001', type: 'bicycle', lane: 'crossing', initial_distance: 8, speed: 5, behavior: 'cut_in_right' },
+    ],
+    'test case': [
+      { step: 1, action: 'Cyclist enters sensor FOV at 8 m', reaction: 'ADAS classifies object as bicycle', pass_criteria: 'Classification latency ≤ 80 ms' },
+      { step: 2, action: 'AEB emergency stop triggered', reaction: 'Ego decelerates at max rate', pass_criteria: 'Full stop within 7 m of cyclist' },
+      { step: 3, action: 'Post-stop stability check', reaction: 'Ego remains in lane', pass_criteria: 'No lane departure after stop' },
+    ],
+    type: 'test_case',
+  },
+  {
+    scenario_id: 'TC-req-009-01',
+    covers_requirements: ['req-009'],
+    feature_under_test: 'Adaptive Cruise Control — following distance maintenance',
+    complexity: 'MEDIUM',
+    test_phase: 'SIL',
+    tags: ['nominal', 'performance'],
+    description: 'Ego follows a lead vehicle at 100 km/h; ACC must maintain 2 s headway when lead decelerates.',
+    preconditions: ['Lead vehicle 50 m ahead', 'Highway, no lane changes'],
+    environment: { map: 'Town06', weather: 'clear', lighting: 'daylight' },
+    ego_vehicle: { state: 'cruising', lane: '1', initial_speed: 100, set_speed: 100, parameters: {} },
+    actors: [
+      { id: 'veh-lead', type: 'car', lane: '1', initial_distance: 50, speed: 100, behavior: 'decelerate_to_60' },
+    ],
+    'test case': [
+      { step: 1, action: 'Lead vehicle decelerates from 100 to 60 km/h', reaction: 'ACC detects speed change', pass_criteria: 'Speed change detected within 150 ms' },
+      { step: 2, action: 'ACC reduces ego speed proportionally', reaction: 'Headway increases then stabilizes', pass_criteria: 'Headway 1.8 – 2.2 s during deceleration' },
+      { step: 3, action: 'Lead vehicle holds 60 km/h', reaction: 'Ego settles at 60 km/h', pass_criteria: 'Ego speed within ±2 km/h of lead' },
+    ],
+    type: 'test_case',
+  },
+  {
+    scenario_id: 'TC-req-012-01',
+    covers_requirements: ['req-012'],
+    feature_under_test: 'AEB — wet road braking performance',
+    complexity: 'HIGH',
+    test_phase: 'SIL+HIL',
+    tags: ['performance', 'boundary'],
+    description: 'Ego brakes on wet road at 80 km/h; AEB must compensate for reduced friction and avoid collision.',
+    preconditions: ['Road surface wet (µ = 0.5)', 'No ABS activation before test'],
+    environment: { map: 'Town03', weather: 'heavy_rain', lighting: 'overcast' },
+    ego_vehicle: { state: 'driving', lane: '1', initial_speed: 80, set_speed: null, parameters: { road_friction: 0.5 } },
+    actors: [
+      { id: 'veh-002', type: 'car', lane: '1', initial_distance: 25, speed: 0, behavior: 'stationary' },
+    ],
+    'test case': [
+      { step: 1, action: 'Ego approaches stationary car at 80 km/h on wet surface', reaction: 'AEB pre-charges and activates ABS', pass_criteria: 'ABS activated within 50 ms of AEB trigger' },
+      { step: 2, action: 'Controlled deceleration on wet road', reaction: 'Ego decelerates without skid', pass_criteria: 'Yaw rate ≤ 5°/s during braking' },
+      { step: 3, action: 'Vehicle stops before obstacle', reaction: 'No collision', pass_criteria: 'Stop distance ≤ 30 m from obstacle' },
+    ],
+    type: 'test_case',
+  },
+  {
+    scenario_id: 'TC-req-015-01',
+    covers_requirements: ['req-015'],
+    feature_under_test: 'LKA — false positive suppression on lane merge',
+    complexity: 'MEDIUM',
+    test_phase: 'SIL+HIL',
+    tags: ['edge_case', 'nominal'],
+    description: 'Ego performs intentional lane change; LKA must not apply corrective steering when turn signal is active.',
+    preconditions: ['Turn signal active for ≥ 0.5 s before maneuver', 'Adjacent lane clear'],
+    environment: { map: 'Town06', weather: 'clear', lighting: 'daylight' },
+    ego_vehicle: { state: 'lane_change_signaled', lane: '2', initial_speed: 90, set_speed: 90, parameters: {} },
+    actors: [],
+    'test case': [
+      { step: 1, action: 'Ego activates right turn signal', reaction: 'LKA suppression engaged', pass_criteria: 'LKA torque = 0 within 100 ms of signal' },
+      { step: 2, action: 'Ego crosses lane marking', reaction: 'No corrective steering applied', pass_criteria: 'Steering torque from LKA < 0.5 Nm' },
+      { step: 3, action: 'Ego settles in lane 3, signal off', reaction: 'LKA resumes normal operation', pass_criteria: 'LKA active within 1.0 s of signal off' },
+    ],
+    type: 'test_case',
+  },
+  {
+    scenario_id: 'TC-req-016-01',
+    covers_requirements: ['req-016'],
+    feature_under_test: 'AEB — night-time pedestrian detection',
+    complexity: 'LOW',
+    test_phase: 'SIL',
+    tags: ['nominal', 'edge_case'],
+    description: 'Ego approaches pedestrian at night with headlights active; AEB must trigger within TTC threshold.',
+    environment: { map: 'Town03', weather: 'clear', lighting: 'night' },
+    ego_vehicle: { state: 'driving', lane: '1', initial_speed: 40, set_speed: null, parameters: { headlights: true } },
+    actors: [
+      { id: 'ped-002', type: 'pedestrian', lane: 'crossing', initial_distance: 12, speed: 1.5, behavior: 'cross_left_to_right' },
+    ],
+    'test case': [
+      { step: 1, action: 'Ego headlights illuminate pedestrian at 12 m', reaction: 'Camera and radar detect pedestrian', pass_criteria: 'Detection within 200 ms at 12 m range' },
+      { step: 2, action: 'AEB triggers', reaction: 'Emergency braking applied', pass_criteria: 'TTC at trigger ≥ 1.2 s' },
+    ],
+    type: 'test_case',
+  },
+  {
+    scenario_id: 'TC-req-016-02',
+    covers_requirements: ['req-016'],
+    feature_under_test: 'AEB — night-time pedestrian, oncoming glare',
+    complexity: 'HIGH',
+    test_phase: 'SIL+HIL',
+    tags: ['edge_case', 'boundary'],
+    description: 'Oncoming headlights cause sensor glare; AEB must still detect pedestrian and brake in time.',
+    preconditions: ['Oncoming vehicle 40 m ahead with high-beam lights', 'Pedestrian in ego lane'],
+    environment: { map: 'Town03', weather: 'clear', lighting: 'night' },
+    ego_vehicle: { state: 'driving', lane: '1', initial_speed: 40, set_speed: null, parameters: { headlights: true } },
+    actors: [
+      { id: 'ped-003', type: 'pedestrian', lane: '1', initial_distance: 10, speed: 0, behavior: 'stationary' },
+      { id: 'veh-oncoming', type: 'car', lane: 'oncoming', initial_distance: 40, speed: 50, behavior: 'approach_high_beam' },
+    ],
+    'test case': [
+      { step: 1, action: 'Oncoming vehicle triggers glare on ego sensors', reaction: 'Radar continues tracking, camera degrades', pass_criteria: 'Radar maintains object lock through glare' },
+      { step: 2, action: 'AEB triggers on radar track alone', reaction: 'Emergency braking', pass_criteria: 'Braking initiated within 300 ms of radar-only detection' },
+      { step: 3, action: 'Ego stops before pedestrian', reaction: 'No collision', pass_criteria: 'Stopping distance ≤ 8 m' },
+    ],
+    type: 'test_case',
+  },
+  {
+    scenario_id: 'TC-req-016-03',
+    covers_requirements: ['req-016'],
+    feature_under_test: 'AEB — night-time, pedestrian in dark clothing',
+    complexity: 'MEDIUM',
+    test_phase: 'SIL',
+    tags: ['boundary', 'performance'],
+    description: 'Pedestrian wearing dark clothes at night; tests camera minimum detection threshold.',
+    environment: { map: 'Town03', weather: 'clear', lighting: 'night' },
+    ego_vehicle: { state: 'driving', lane: '1', initial_speed: 35, set_speed: 35, parameters: { headlights: true } },
+    actors: [
+      { id: 'ped-004', type: 'pedestrian', lane: 'crossing', initial_distance: 10, speed: 2, behavior: 'cross_right_to_left' },
+    ],
+    'test case': [
+      { step: 1, action: 'Ego approaches low-reflectivity pedestrian at night', reaction: 'Sensor fusion detects partial signature', pass_criteria: 'Object classified within 250 ms at 10 m' },
+      { step: 2, action: 'AEB triggers', reaction: 'Full emergency braking', pass_criteria: 'No collision; TTC at trigger ≥ 1.0 s' },
+    ],
+    type: 'test_case',
+  },
+  {
+    scenario_id: 'TC-req-016-04',
+    covers_requirements: ['req-016'],
+    feature_under_test: 'AEB — night-time, group of pedestrians',
+    complexity: 'HIGH',
+    test_phase: 'SIL+HIL',
+    tags: ['edge_case'],
+    description: 'Multiple pedestrians crossing at night; AEB targets nearest and avoids false prioritization.',
+    preconditions: ['3 pedestrians at staggered distances: 8 m, 12 m, 18 m'],
+    environment: { map: 'Town03', weather: 'clear', lighting: 'night' },
+    ego_vehicle: { state: 'driving', lane: '1', initial_speed: 40, set_speed: null, parameters: { headlights: true } },
+    actors: [
+      { id: 'ped-005', type: 'pedestrian', lane: 'crossing', initial_distance: 8, speed: 1, behavior: 'cross_left_to_right' },
+      { id: 'ped-006', type: 'pedestrian', lane: 'crossing', initial_distance: 12, speed: 2, behavior: 'stationary' },
+      { id: 'ped-007', type: 'pedestrian', lane: 'crossing', initial_distance: 18, speed: 3, behavior: 'cross_right_to_left' },
+    ],
+    'test case': [
+      { step: 1, action: 'Sensor identifies 3 pedestrian signatures', reaction: 'Tracker assigns threat levels', pass_criteria: 'Nearest pedestrian (8 m) has highest threat score' },
+      { step: 2, action: 'AEB brakes for nearest pedestrian', reaction: 'Ego stops before 8 m pedestrian', pass_criteria: 'No contact with any pedestrian' },
+    ],
+    type: 'test_case',
+  },
+  {
+    scenario_id: 'TC-req-016-05',
+    covers_requirements: ['req-016'],
+    feature_under_test: 'AEB — night-time, high-speed approach',
+    complexity: 'HIGH',
+    test_phase: 'SIL',
+    tags: ['performance', 'boundary'],
+    description: 'Ego approaches pedestrian at 60 km/h at night; validates extended braking distance margin.',
+    environment: { map: 'Town06', weather: 'clear', lighting: 'night' },
+    ego_vehicle: { state: 'driving', lane: '1', initial_speed: 60, set_speed: null, parameters: { headlights: true } },
+    actors: [
+      { id: 'ped-008', type: 'pedestrian', lane: '1', initial_distance: 20, speed: 0, behavior: 'stationary' },
+    ],
+    'test case': [
+      { step: 1, action: 'Ego travels 60 km/h toward stationary pedestrian at night', reaction: 'Detection at headlight range limit', pass_criteria: 'Detection at ≥ 18 m distance' },
+      { step: 2, action: 'AEB full activation', reaction: 'Maximum deceleration applied', pass_criteria: 'Deceleration ≥ 9 m/s²' },
+      { step: 3, action: 'Ego stops before pedestrian', reaction: 'No collision', pass_criteria: 'Stop within 19 m from start of braking' },
+    ],
+    type: 'test_case',
+  },
+]
+
+const MOCK_TEST_CASES_V2: TestCase[] = [
+  ...MOCK_TEST_CASES,
+  {
+    scenario_id: 'TC-req-020-01',
+    covers_requirements: ['req-020'],
+    feature_under_test: 'AEB — motorcycle detection at highway speeds',
+    complexity: 'HIGH',
+    test_phase: 'SIL+HIL',
+    tags: ['edge_case', 'performance'],
+    description: 'Ego approaches a slow-moving motorcycle at 110 km/h on highway; narrow profile challenges radar.',
+    preconditions: ['Ego in cruise at 110 km/h', 'Motorcycle 40 m ahead at 40 km/h'],
+    environment: { map: 'Town06', weather: 'clear', lighting: 'daylight' },
+    ego_vehicle: { state: 'cruising', lane: '1', initial_speed: 110, set_speed: 110, parameters: {} },
+    actors: [
+      { id: 'moto-001', type: 'motorcycle', lane: '1', initial_distance: 40, speed: 40, behavior: 'constant_speed' },
+    ],
+    'test case': [
+      { step: 1, action: 'Radar tracks narrow motorcycle at 40 m', reaction: 'Object classified as motorcycle', pass_criteria: 'Classification confidence ≥ 85 %' },
+      { step: 2, action: 'ACC/AEB hand-off: closing speed > threshold', reaction: 'AEB takes over from ACC', pass_criteria: 'Hand-off latency ≤ 50 ms' },
+      { step: 3, action: 'Emergency braking from 110 km/h', reaction: 'Ego decelerates', pass_criteria: 'No collision; TTC at intervention ≥ 1.5 s' },
+    ],
+    type: 'test_case',
+  },
+  {
+    scenario_id: 'TC-req-022-01',
+    covers_requirements: ['req-022'],
+    feature_under_test: 'Driver monitoring — attention alert',
+    complexity: 'LOW',
+    test_phase: 'SIL',
+    tags: ['nominal'],
+    description: 'Driver gaze leaves road for > 3 s; DMS must trigger audible and visual alert.',
+    preconditions: ['Ego in highway cruise at 90 km/h', 'DMS camera active'],
+    environment: { map: 'Town06', weather: 'clear', lighting: 'daylight' },
+    ego_vehicle: { state: 'cruising', lane: '1', initial_speed: 90, set_speed: 90, parameters: { dms_active: true } },
+    actors: [],
+    'test case': [
+      { step: 1, action: 'Simulated driver gaze off-road for 3.1 s', reaction: 'DMS detects inattention', pass_criteria: 'Inattention flag set within 100 ms of 3 s threshold' },
+      { step: 2, action: 'Alert triggered', reaction: 'Audio + HMI visual alert', pass_criteria: 'Alert latency ≤ 200 ms from flag' },
+    ],
+    type: 'test_case',
+  },
+]
+
 const SCENARIO_RESULT: ScenarioResult = {
   total: 47, warnings: 2,
   scenarios: [
@@ -89,6 +378,7 @@ const SCENARIO_RESULT: ScenarioResult = {
     { id: 's-005', filename: 'LKA_highway_70kph.xosc', type: 'xosc', warnings: ['ASAM: ActorRef ambiguity in condition group'] },
     { id: 's-006', filename: 'ego_route_renault.xodr', type: 'xodr', warnings: [] },
   ],
+  testCases: MOCK_TEST_CASES,
 }
 
 // Updated scenario result for refactored runs
@@ -103,6 +393,7 @@ const SCENARIO_RESULT_V2: ScenarioResult = {
     { id: 's-006', filename: 'AEB_stationary_city.xosc', type: 'xosc', warnings: [] },
     { id: 's-007', filename: 'ego_route_renault_v2.xodr', type: 'xodr', warnings: [] },
   ],
+  testCases: MOCK_TEST_CASES_V2,
 }
 
 const MOCK_LOGS: LogLine[] = [
