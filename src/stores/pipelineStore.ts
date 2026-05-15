@@ -557,7 +557,8 @@ async function runScenarioGeneration(id: string, set: SetFn, get: GetFn) {
 const BLANK: ConversationPipeline = {
   stage: 0, round: 1, entryStage: 1, agentMessage: null,
   nlp: 'idle', scenario: 'idle', execution: 'idle', report: 'idle',
-  engineerInput: null, nlpResult: null, nlpProgress: {}, scenarioResult: null,
+  engineerInput: null, nlpResult: null, nlpProgress: {}, nlpEventQueue: [],
+  scenarioEventQueue: [], scenarioResult: null,
   executionResult: null, reportResult: null, priorRounds: [],
 }
 
