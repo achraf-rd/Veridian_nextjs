@@ -22,7 +22,7 @@ export default function RequirementsReviewPage() {
   const searchParams = useSearchParams()
   const roundParam = searchParams?.get('round') ?? null
 
-  const { getPipeline } = usePipelineStore()
+  const { getPipeline, approveNLP } = usePipelineStore()
   const pipeline = getPipeline(convId)
 
   // If ?round=N is in the URL, serve data from that prior round (read-only view).
@@ -123,7 +123,7 @@ export default function RequirementsReviewPage() {
   }
 
   const handleApproveContinue = () => {
-    if (!isReady) return
+    approveNLP(convId)
     router.push(`/project/${projectId}/conversation/${convId}`)
   }
 
@@ -189,23 +189,21 @@ export default function RequirementsReviewPage() {
 
           {!isHistorical && (
             <>
-              {isReady && (
-                <span className="text-[11px] text-vrd-text-muted hidden lg:inline">
-                  Approving will queue {totalScenarios} scenarios
-                </span>
-              )}
+              <span className="text-[11px] text-vrd-text-muted hidden lg:inline">
+                {isReady
+                  ? `Approving will queue ${totalScenarios} scenarios`
+                  : `${effectiveConflicts} conflict(s) — approve anyway?`}
+              </span>
               <Button
+                variant={isReady ? 'primary' : 'outline'}
                 onClick={handleApproveContinue}
-                disabled={!isReady}
-                title={
-                  !isReady
-                    ? data.pipeline_status.reason ?? 'Conflicts must be resolved before continuing'
-                    : `Approving will queue ${totalScenarios} scenarios`
-                }
+                title={isReady
+                  ? `Approving will queue ${totalScenarios} scenarios`
+                  : `${effectiveConflicts} conflict(s) detected — click to approve anyway`}
                 className={cn(isReady && 'animate-pulse-ring')}
               >
                 <CheckCircle2 className="w-4 h-4" />
-                Approve &amp; continue
+                {isReady ? 'Approve & continue' : 'Approve anyway'}
               </Button>
             </>
           )}
@@ -301,11 +299,11 @@ function StatusPill({
   }
 
   return (
-    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-danger/10 border border-danger/30 flex-shrink-0">
-      <AlertTriangle className="w-3.5 h-3.5 text-danger" />
-      <span className="text-xs font-medium text-danger">
-        Blocked — {effectiveConflicts}{' '}
-        {effectiveConflicts === 1 ? 'conflict' : 'conflicts'}
+    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-warning/10 border border-warning/30 flex-shrink-0">
+      <AlertTriangle className="w-3.5 h-3.5 text-warning" />
+      <span className="text-xs font-medium text-warning">
+        {effectiveConflicts}{' '}
+        {effectiveConflicts === 1 ? 'conflict' : 'conflicts'} detected
       </span>
       {blockedBy.length > 0 && (
         <div className="flex items-center gap-1 border-l border-danger/30 pl-2">

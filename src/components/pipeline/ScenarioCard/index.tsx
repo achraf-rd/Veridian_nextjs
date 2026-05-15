@@ -8,78 +8,42 @@ import {
   CheckCircle2,
   Loader2,
   AlertTriangle,
-  Circle,
 } from 'lucide-react'
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { usePipelineStore } from '@/stores/pipelineStore'
 import { Badge, Button } from '@/components/ui'
 import { cn } from '@/lib/utils'
-import type { CardState, ScenarioResult, ScenarioTaskProgress } from '@/types/pipeline'
+import type { CardState, ScenarioResult } from '@/types/pipeline'
 
-// ─── Task definitions (mirrors Agent 2 internal pipeline stages) ──────────────
+// ─── Utilities ────────────────────────────────────────────────────────────────
 
-const TASKS = [
-  { num: 1, name: 'clean',    fn: 'clean()',    done: 'requirements cleaned' },
-  { num: 2, name: 'group',    fn: 'group()',    done: 'requirements grouped' },
-  { num: 3, name: 'generate', fn: 'generate()', done: 'scenarios generated'  },
-  { num: 4, name: 'merge',    fn: 'merge()',    done: 'results merged'        },
-  { num: 5, name: 'evaluate', fn: 'evaluate()', done: 'best scenarios selected' },
-] as const
-
-type TaskStatus = 'idle' | 'running' | 'done'
+function formatDuration(startISO: string | undefined, endISO: string | undefined): string {
+  if (!startISO || !endISO) return ''
+  const start = new Date(startISO)
+  const end = new Date(endISO)
+  const ms = end.getTime() - start.getTime()
+  if (ms < 1000) return `${ms}ms`
+  const sec = (ms / 1000).toFixed(1)
+  return `${sec}s`
+}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function TaskRow({
-  task,
-  status,
-  message,
-}: {
-  task: (typeof TASKS)[number]
-  status: TaskStatus
-  message?: string
-}) {
+function MessageRow({ message, isCurrent }: { message: string; isCurrent: boolean }) {
   return (
-    <div
-      className={cn(
-        'flex items-center gap-3 text-[12px] transition-opacity duration-200',
-        status === 'idle' && 'opacity-35',
-      )}
-    >
+    <div className="flex items-center gap-3 text-[12px]">
       <span className="w-4 flex-shrink-0 flex items-center justify-center">
-        {status === 'done'    && <CheckCircle2 className="w-3.5 h-3.5 text-success" />}
-        {status === 'running' && <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />}
-        {status === 'idle'    && <Circle className="w-3.5 h-3.5 text-vrd-border" />}
+        {isCurrent
+          ? <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+          : <CheckCircle2 className="w-3.5 h-3.5 text-success" />}
       </span>
-
-      <span
-        className={cn(
-          'font-mono',
-          status === 'done'    && 'text-vrd-text-muted',
-          status === 'running' && 'text-primary',
-          status === 'idle'    && 'text-vrd-text-dim',
-        )}
-      >
-        Task {task.num}
+      <span className={cn('font-mono flex-1', isCurrent ? 'text-vrd-text font-semibold' : 'text-vrd-text-muted')}>
+        {message}
       </span>
-      <span
-        className={cn(
-          'font-mono',
-          status === 'done'    && 'text-vrd-text',
-          status === 'running' && 'text-vrd-text font-semibold',
-          status === 'idle'    && 'text-vrd-text-dim',
-        )}
-      >
-        {task.fn}
-      </span>
-
-      <span className="ml-auto font-mono text-[11px] flex items-center gap-2">
-        {status === 'running' && (
-          <span className="text-primary animate-pulse">running…</span>
-        )}
-        {status === 'done' && (
-          <span className="text-success">{message ?? task.done}</span>
-        )}
+      <span className="font-mono text-[11px]">
+        {isCurrent
+          ? <span className="text-primary animate-pulse">running…</span>
+          : <span className="text-success">done</span>}
       </span>
     </div>
   )
@@ -126,16 +90,18 @@ export default function ScenarioCard({ state, result }: Props) {
   const projectId = params?.projectId ?? ''
   const { approveScenario } = usePipelineStore()
   const scenarioEventQueue = usePipelineStore(s => s.pipelines[convId]?.scenarioEventQueue ?? [])
+  const scenarioStartedAt = usePipelineStore(s => s.pipelines[convId]?.scenarioStartedAt)
+  const scenarioFinishedAt = usePipelineStore(s => s.pipelines[convId]?.scenarioFinishedAt)
   const round              = usePipelineStore(s => s.pipelines[convId]?.round ?? 1)
 
-  // Local display state — drained from the queue one entry per rAF
-  const [displayProgress, setDisplayProgress] = useState<Record<string, ScenarioTaskProgress>>({})
+  // Local message list — drained from the queue one entry per rAF
+  const [displayMessages, setDisplayMessages] = useState<string[]>([])
   const processedCountRef = useRef(0)
 
   // Reset when a new round starts
   useEffect(() => {
     processedCountRef.current = 0
-    setDisplayProgress({})
+    setDisplayMessages([])
   }, [round])
 
   // Drain queue one entry per animation frame
@@ -149,26 +115,15 @@ export default function ScenarioCard({ state, result }: Props) {
       processedCountRef.current = idx + 1
 
       if (process.env.NODE_ENV === 'development') {
-        console.log(`[ScenarioCard] rAF ${idx} → ${entry.name}`, entry.patch, performance.now().toFixed(1))
+        console.log(`[ScenarioCard] rAF ${idx} → ${entry.message}`, performance.now().toFixed(1))
       }
 
-      setDisplayProgress(prev => {
-        const existing = prev[entry.name] ?? { stageNum: 0, status: 'running' as const }
-        return { ...prev, [entry.name]: { ...existing, ...entry.patch } }
-      })
+      setDisplayMessages(prev => [...prev, entry.message])
     })
 
     return () => cancelAnimationFrame(rafId)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scenarioEventQueue, displayProgress])
-
-  const getTaskStatus = (taskName: string): TaskStatus => {
-    const p = displayProgress[taskName]
-    if (!p) return 'idle'
-    return p.status === 'completed' ? 'done' : 'running'
-  }
-
-  const getTaskMessage = (taskName: string) => displayProgress[taskName]?.message
+  }, [scenarioEventQueue, displayMessages])
 
   const testCases = result?.testCases ?? []
 
@@ -208,6 +163,11 @@ export default function ScenarioCard({ state, result }: Props) {
                   : `${result?.total ?? 0} scenarios generated`}
               </span>
             </p>
+            {scenarioStartedAt && scenarioFinishedAt && (
+              <p className="text-[11px] text-vrd-text-muted font-mono mt-0.5">
+                ⏱ Generated in {formatDuration(scenarioStartedAt, scenarioFinishedAt)}
+              </p>
+            )}
           </div>
           <Badge variant="success">Approved</Badge>
         </div>
@@ -251,15 +211,21 @@ export default function ScenarioCard({ state, result }: Props) {
           <Badge variant="info">Processing</Badge>
         </div>
 
-        <div className="px-4 py-3 space-y-2.5 font-mono">
-          {TASKS.map((task) => (
-            <TaskRow
-              key={task.num}
-              task={task}
-              status={getTaskStatus(task.name)}
-              message={getTaskMessage(task.name)}
-            />
-          ))}
+        <div className="px-4 py-3 space-y-2.5">
+          {displayMessages.length === 0 ? (
+            <div className="flex items-center gap-3 text-[12px]">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-primary flex-shrink-0" />
+              <span className="font-mono text-vrd-text-muted animate-pulse">Connecting to agent…</span>
+            </div>
+          ) : (
+            displayMessages.map((msg, idx) => (
+              <MessageRow
+                key={idx}
+                message={msg}
+                isCurrent={idx === displayMessages.length - 1}
+              />
+            ))
+          )}
         </div>
       </div>
     )
@@ -288,6 +254,12 @@ export default function ScenarioCard({ state, result }: Props) {
                 <span className="font-medium">{stats.reqCount} requirements</span>.
               </p>
 
+              {scenarioStartedAt && scenarioFinishedAt && (
+                <p className="text-[11px] text-vrd-text-muted font-mono">
+                  ⏱ Generated in {formatDuration(scenarioStartedAt, scenarioFinishedAt)}
+                </p>
+              )}
+
               <div className="flex flex-wrap gap-1.5">
                 {(['LOW', 'MEDIUM', 'HIGH'] as const).map((lvl) =>
                   stats.complexity[lvl] > 0 ? (
@@ -315,13 +287,20 @@ export default function ScenarioCard({ state, result }: Props) {
               )}
             </div>
           ) : (
-            <p className="text-sm text-vrd-text">
-              Scenario generation complete —{' '}
-              <span className="font-medium">{result.total} scenarios</span> generated
-              {result.warnings > 0 && (
-                <>, <span className="text-warning font-medium">{result.warnings} ASAM warnings</span></>
-              )}.
-            </p>
+            <div className="space-y-1">
+              <p className="text-sm text-vrd-text">
+                Scenario generation complete —{' '}
+                <span className="font-medium">{result.total} scenarios</span> generated
+                {result.warnings > 0 && (
+                  <>, <span className="text-warning font-medium">{result.warnings} ASAM warnings</span></>
+                )}.
+              </p>
+              {scenarioFinishedAt && scenarioStartedAt && (
+                <p className="text-[11px] text-vrd-text-muted font-mono">
+                  ⏱ Took {formatDuration(scenarioStartedAt, scenarioFinishedAt)}
+                </p>
+              )}
+            </div>
           )}
         </div>
 

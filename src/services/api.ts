@@ -71,13 +71,27 @@ export async function* streamGenerateScenarios(
     buffer = lines.pop()!
 
     for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        try {
-          const event = JSON.parse(line.slice(6)) as ScenarioEvent
-          yield event
-        } catch {
-          // skip malformed lines
+      if (!line.startsWith('data: ')) continue
+      try {
+        // Real Agent 2 SSE format:
+        // { status: 'started' | 'running', message: string }
+        // { status: 'done', refining_id, feature, total_scenarios, scenarios[] }
+        const raw = JSON.parse(line.slice(6)) as Record<string, unknown>
+        if (raw.status === 'done') {
+          yield {
+            type: 'result',
+            output: {
+              refining_id: raw.refining_id as string | null,
+              feature:     raw.feature     as string | null,
+              total_scenarios: raw.total_scenarios as number,
+              scenarios:   raw.scenarios   as Record<string, unknown>[],
+            },
+          }
+        } else if (raw.status === 'started' || raw.status === 'running') {
+          yield { type: 'progress', message: (raw.message as string) ?? String(raw.status) }
         }
+      } catch {
+        // skip malformed lines
       }
     }
   }

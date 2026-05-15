@@ -18,14 +18,8 @@ export type RefinementEvent =
   | { type: 'result'; output: RefinementResult }
   | { type: 'error'; detail: string }
 
-export interface ScenarioTaskProgress {
-  stageNum: number
-  status: 'running' | 'completed'
-  message?: string
-}
-
 export type ScenarioEvent =
-  | { type: 'stage'; stage: number; name: string; label: string; status: 'running' | 'completed'; message?: string }
+  | { type: 'progress'; message: string }
   | { type: 'result'; output: GenerateResponse }
   | { type: 'error'; detail: string }
 
@@ -99,11 +93,19 @@ export interface ConversationPipeline {
   nlpProgress: Record<string, NLPTaskProgress>
   /** Animation queue: events pushed immediately by SSE, drained one-per-rAF by NLPCard */
   nlpEventQueue: Array<{ name: string; patch: Partial<NLPTaskProgress> }>
-  /** Animation queue for ScenarioCard SSE events, drained one-per-rAF */
-  scenarioEventQueue: Array<{ name: string; patch: Partial<ScenarioTaskProgress> }>
+  nlpStartedAt?: string
+  nlpFinishedAt?: string
+  /** SSE progress messages from Agent 2, drained one-per-rAF by ScenarioCard */
+  scenarioEventQueue: Array<{ message: string }>
   scenarioResult: ScenarioResult | null
+  scenarioStartedAt?: string
+  scenarioFinishedAt?: string
   executionResult: ExecutionResult | null
+  executionStartedAt?: string
+  executionFinishedAt?: string
   reportResult: ReportResult | null
+  reportStartedAt?: string
+  reportFinishedAt?: string
   /** All fully completed prior rounds */
   priorRounds: PipelineRound[]
 }

@@ -18,6 +18,18 @@ import { cn } from '@/lib/utils'
 import type { CardState, NLPTaskProgress } from '@/types/pipeline'
 import type { RefinementResult } from '@/types/requirements'
 
+// ─── Utilities ────────────────────────────────────────────────────────────────
+
+function formatDuration(startISO: string | undefined, endISO: string | undefined): string {
+  if (!startISO || !endISO) return ''
+  const start = new Date(startISO)
+  const end = new Date(endISO)
+  const ms = end.getTime() - start.getTime()
+  if (ms < 1000) return `${ms}ms`
+  const sec = (ms / 1000).toFixed(1)
+  return `${sec}s`
+}
+
 // ─── Task definitions (mirrors SSE task_name values) ─────────────────────────
 
 const TASKS = [
@@ -45,6 +57,8 @@ export default function NLPCard({ state, result }: Props) {
   const projectId = params?.projectId ?? ''
   const approveNLP    = usePipelineStore(s => s.approveNLP)
   const nlpEventQueue = usePipelineStore(s => s.pipelines[convId]?.nlpEventQueue ?? [])
+  const nlpStartedAt = usePipelineStore(s => s.pipelines[convId]?.nlpStartedAt)
+  const nlpFinishedAt = usePipelineStore(s => s.pipelines[convId]?.nlpFinishedAt)
   const round         = usePipelineStore(s => s.pipelines[convId]?.round ?? 1)
 
   // Local display state — animated from the queue one entry per rAF
@@ -86,8 +100,7 @@ export default function NLPCard({ state, result }: Props) {
   }, [nlpEventQueue, displayProgress])
 
   const summary = result?.summary
-  // Only conflicts block the gate — duplicates are informational and never block.
-  const isBlocked = (result?.summary.total_conflicts ?? 0) > 0
+  const hasConflicts = (result?.summary.total_conflicts ?? 0) > 0
 
   // displayProgress is keyed by event.name
   const getTaskProgress = (taskName: string) => displayProgress[taskName]
@@ -188,13 +201,13 @@ export default function NLPCard({ state, result }: Props) {
     <div
       className={cn(
         'rounded-xl border bg-vrd-card animate-fade-up transition-all duration-300',
-        isBlocked ? 'border-danger/30' : 'border-success/25',
+        hasConflicts ? 'border-warning/30' : 'border-success/25',
       )}
     >
       {/* Header */}
       <div className="flex items-start gap-3 px-4 py-3">
-        {isBlocked ? (
-          <AlertTriangle className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" />
+        {hasConflicts ? (
+          <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
         ) : (
           <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
         )}
@@ -204,8 +217,8 @@ export default function NLPCard({ state, result }: Props) {
             <span className="text-xs font-mono font-medium text-vrd-text-muted uppercase tracking-wider">
               Requirements Refiner
             </span>
-            {isBlocked ? (
-              <Badge variant="danger">BLOCKED</Badge>
+            {hasConflicts ? (
+              <Badge variant="warning">Conflicts detected</Badge>
             ) : (
               <Badge variant="success">Ready</Badge>
             )}
@@ -213,12 +226,12 @@ export default function NLPCard({ state, result }: Props) {
 
           {/* Summary line */}
           <p className="text-sm text-vrd-text leading-snug">
-            {isBlocked ? (
+            {hasConflicts ? (
               <>
-                <span className="text-danger font-medium">
+                <span className="text-warning font-medium">
                   {result.summary.total_conflicts} conflict{result.summary.total_conflicts !== 1 ? 's' : ''}
                 </span>
-                {' '}must be resolved before proceeding.
+                {' '}detected — review or approve to proceed.
               </>
             ) : (
               <>All checks passed — ready to generate scenarios.</>
@@ -252,6 +265,12 @@ export default function NLPCard({ state, result }: Props) {
               <>
                 <span className="text-vrd-text-dim">·</span>
                 <span className="text-warning">{result.summary.total_overlaps} overlaps</span>
+              </>
+            )}
+            {nlpFinishedAt && nlpStartedAt && (
+              <>
+                <span className="text-vrd-text-dim">·</span>
+                <span className="text-vrd-text-dim">⏱ {formatDuration(nlpStartedAt, nlpFinishedAt)}</span>
               </>
             )}
           </div>
@@ -382,40 +401,31 @@ export default function NLPCard({ state, result }: Props) {
       <div
         className={cn(
           'flex items-center gap-3 px-4 py-3 border-t border-vrd-border',
-          isBlocked && 'bg-danger/5',
+          hasConflicts && 'bg-warning/5',
         )}
       >
         <Link
           href={`/project/${projectId}/conversation/${convId}/requirements`}
-          className={cn(
-            'text-xs font-medium transition-colors',
-            isBlocked
-              ? 'text-danger hover:text-danger/80'
-              : 'text-vrd-text-muted hover:text-vrd-text',
-          )}
+          className="text-xs font-medium text-vrd-text-muted hover:text-vrd-text transition-colors"
         >
-          {isBlocked ? 'Review & resolve →' : 'Review requirements →'}
+          {hasConflicts ? 'Review conflicts →' : 'Review requirements →'}
         </Link>
 
         <div className="ml-auto flex items-center gap-2">
-          {!isBlocked && (
-            <span className="text-[11px] text-vrd-text-dim hidden sm:inline">
-              Queues {totalScenarios} scenarios
-            </span>
-          )}
+          <span className="text-[11px] text-vrd-text-dim hidden sm:inline">
+            Queues {totalScenarios} scenarios
+          </span>
           <Button
             size="sm"
-            onClick={() => !isBlocked && approveNLP(convId)}
-            disabled={isBlocked}
-            title={
-              isBlocked
-                ? result.pipeline_status.reason ?? 'Conflicts must be resolved before continuing'
-                : `Approve — will queue ${totalScenarios} scenarios`
-            }
-            className={cn(!isBlocked && 'animate-pulse-ring')}
+            variant={hasConflicts ? 'outline' : 'primary'}
+            onClick={() => approveNLP(convId)}
+            title={hasConflicts
+              ? `${result.summary.total_conflicts} conflict(s) detected — click to approve anyway`
+              : `Approve — will queue ${totalScenarios} scenarios`}
+            className={cn(!hasConflicts && 'animate-pulse-ring')}
           >
             <CheckCircle2 className="w-3.5 h-3.5" />
-            Approve &amp; continue
+            {hasConflicts ? 'Approve anyway' : 'Approve & continue'}
           </Button>
         </div>
       </div>

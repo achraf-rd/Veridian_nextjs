@@ -34,7 +34,10 @@
       "PowerShell(cd \"C:\\\\Users\\\\pc\\\\Desktop\\\\my\\\\pfe2026\\\\project\\\\Veridian_frontend\" && \\(Get-Content package.json | Select-String \"zustand|\\\\\"react\\\\\"|\\\\\"next\\\\\"\"\\) | ForEach-Object { $_.Line.Trim\\(\\) })",
       "Bash(curl *)",
       "Bash(New-Item -ItemType Directory -Path \"C:\\\\Users\\\\pc\\\\Desktop\\\\my\\\\pfe2026\\\\project\\\\Veridian_frontend\\\\src\\\\app\\\\api\\\\generate-scenarios\\\\stream\" -Force)",
-      "Bash(Out-Null)"
+      "Bash(Out-Null)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\pc\\\\Desktop\\\\my\\\\pfe2026\\\\project\\\\Veridian_frontend\" -Recurse -File -Name)",
+      "Bash(xargs grep -l \"client.*notification\\\\|notify.*client\\\\|sendMessage\\\\|message.*client\")",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\pc\\\\Desktop\\\\my\\\\pfe2026\\\\project\\\\Veridian_frontend\\\\src\\\\types\")"
     ]
   }
 }

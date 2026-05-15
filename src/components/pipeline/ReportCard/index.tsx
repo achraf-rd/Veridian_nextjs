@@ -6,7 +6,20 @@ import { useParams } from 'next/navigation'
 import { ChevronDown, ChevronUp, Download, ExternalLink, TrendingUp, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react'
 import { Badge } from '@/components/ui'
 import { cn } from '@/lib/utils'
+import { usePipelineStore } from '@/stores/pipelineStore'
 import type { CardState, ReportResult } from '@/types/pipeline'
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+
+function formatDuration(startISO: string | undefined, endISO: string | undefined): string {
+  if (!startISO || !endISO) return ''
+  const start = new Date(startISO)
+  const end = new Date(endISO)
+  const ms = end.getTime() - start.getTime()
+  if (ms < 1000) return `${ms}ms`
+  const sec = (ms / 1000).toFixed(1)
+  return `${sec}s`
+}
 
 interface Props {
   state: CardState
@@ -18,6 +31,8 @@ export default function ReportCard({ state, result }: Props) {
   const params = useParams() as { projectId?: string; conversationId?: string } | null
   const convId = params?.conversationId ?? ''
   const projectId = params?.projectId ?? ''
+  const reportStartedAt = usePipelineStore(s => s.pipelines[convId]?.reportStartedAt)
+  const reportFinishedAt = usePipelineStore(s => s.pipelines[convId]?.reportFinishedAt)
 
   if (state === 'idle') return null
 
@@ -41,7 +56,14 @@ export default function ReportCard({ state, result }: Props) {
           </div>
           <p className="text-sm text-vrd-text">
             {result
-              ? <>Report ready — Overall verdict: <span className={cn('font-semibold', isPassing ? 'text-success' : 'text-danger')}>{isPassing ? 'Pass' : 'Fail'}</span> ({result.score}%). PDF generated.</>
+              ? <div className="space-y-1">
+                  <div>Report ready — Overall verdict: <span className={cn('font-semibold', isPassing ? 'text-success' : 'text-danger')}>{isPassing ? 'Pass' : 'Fail'}</span> ({result.score}%). PDF generated.</div>
+                  {reportFinishedAt && reportStartedAt && (
+                    <div className="text-[11px] text-vrd-text-muted font-mono">
+                      ⏱ Took {formatDuration(reportStartedAt, reportFinishedAt)}
+                    </div>
+                  )}
+                </div>
               : 'Generating report…'}
           </p>
         </div>

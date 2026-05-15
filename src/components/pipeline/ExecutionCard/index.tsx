@@ -6,7 +6,20 @@ import { useParams } from 'next/navigation'
 import { CheckCircle2, Loader2, ExternalLink } from 'lucide-react'
 import { Badge } from '@/components/ui'
 import { cn } from '@/lib/utils'
+import { usePipelineStore } from '@/stores/pipelineStore'
 import type { CardState, ExecutionResult, LogLine } from '@/types/pipeline'
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+
+function formatDuration(startISO: string | undefined, endISO: string | undefined): string {
+  if (!startISO || !endISO) return ''
+  const start = new Date(startISO)
+  const end = new Date(endISO)
+  const ms = end.getTime() - start.getTime()
+  if (ms < 1000) return `${ms}ms`
+  const sec = (ms / 1000).toFixed(1)
+  return `${sec}s`
+}
 
 const LIVE_LOGS: LogLine[] = [
   { id: 'l1', type: 'info', text: 'Spawning CARLA worker pool (3 workers)…',                        timestamp: '09:14:00' },
@@ -28,6 +41,8 @@ export default function ExecutionCard({ state, result }: Props) {
   const params = useParams() as { projectId?: string; conversationId?: string } | null
   const convId = params?.conversationId ?? ''
   const projectId = params?.projectId ?? ''
+  const executionStartedAt = usePipelineStore(s => s.pipelines[convId]?.executionStartedAt)
+  const executionFinishedAt = usePipelineStore(s => s.pipelines[convId]?.executionFinishedAt)
 
   const [visibleLogs, setVisibleLogs] = useState<LogLine[]>([])
   const [liveCount, setLiveCount] = useState(0)
@@ -101,12 +116,19 @@ export default function ExecutionCard({ state, result }: Props) {
               <>Executing in CARLA — <span className="font-medium">{progress} / 47</span> scenarios complete</>
             )}
             {isApproved && result && (
-              <>
-                Execution complete —{' '}
-                <span className="text-success font-medium">{result.passed} passed</span>,{' '}
-                <span className="text-danger font-medium">{result.failed} failed</span>,{' '}
-                {result.requeued} requeued.
-              </>
+              <div className="space-y-1">
+                <div>
+                  Execution complete —{' '}
+                  <span className="text-success font-medium">{result.passed} passed</span>,{' '}
+                  <span className="text-danger font-medium">{result.failed} failed</span>,{' '}
+                  {result.requeued} requeued.
+                </div>
+                {executionFinishedAt && executionStartedAt && (
+                  <div className="text-[11px] text-vrd-text-muted font-mono">
+                    ⏱ Took {formatDuration(executionStartedAt, executionFinishedAt)}
+                  </div>
+                )}
+              </div>
             )}
           </p>
         </div>

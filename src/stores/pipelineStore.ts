@@ -1,5 +1,6 @@
+import { flushSync } from 'react-dom'
 import { create } from 'zustand'
-import type { ConversationPipeline, NLPTaskProgress, ScenarioTaskProgress, ScenarioResult, ExecutionResult, ReportResult, LogLine, PipelineRound } from '@/types/pipeline'
+import type { ConversationPipeline, NLPTaskProgress, ScenarioResult, ExecutionResult, ReportResult, LogLine, PipelineRound } from '@/types/pipeline'
 import type { RefinementResult, ValidRequirement, IncompleteRequirement, DuplicateRequirement } from '@/types/requirements'
 import type { TestCase } from '@/types/agent2'
 import { MOCK_REFINEMENT } from '@/components/requirements-review/mockData'
@@ -12,8 +13,7 @@ const waitForPaint = () =>
       resolve()
       return
     }
-    // Two RAFs guarantees a paint has occurred before continuing.
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    requestAnimationFrame(() => resolve())
   })
 
 function normalizeValidRequirement(raw: Record<string, unknown>, index: number): ValidRequirement {
@@ -490,19 +490,12 @@ async function runScenarioGeneration(id: string, set: SetFn, get: GetFn) {
   const nlpResult = get().pipelines[id]?.nlpResult
   if (!nlpResult) return
 
-  await waitForPaint()
-
-  const pushToQueue = (name: string, patch: Partial<ScenarioTaskProgress>) => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`[pipeline] scenario pushToQueue name=${name}`, patch, performance.now().toFixed(1))
-    }
-    set((s) => {
-      const p = s.pipelines[id]
-      if (!p || p.scenario !== 'processing') return s
-      const scenarioEventQueue = [...(p.scenarioEventQueue ?? []), { name, patch }]
-      return { pipelines: { ...s.pipelines, [id]: { ...p, scenarioEventQueue } } } as Partial<PipelineStore>
-    })
-  }
+  // Reset the live event queue and mark the start of this run
+  set((s) => {
+    const p = s.pipelines[id]
+    if (!p) return s
+    return { pipelines: { ...s.pipelines, [id]: { ...p, scenarioEventQueue: [], scenarioStartedAt: new Date().toISOString() } } }
+  })
 
   try {
     for await (const event of streamGenerateScenarios({
@@ -511,20 +504,20 @@ async function runScenarioGeneration(id: string, set: SetFn, get: GetFn) {
       requirements: nlpResult.testable    as unknown as Record<string, unknown>[],
     })) {
       if (process.env.NODE_ENV === 'development') {
-        console.log(`[SSE agent2] type=${event.type}`, 'name' in event ? event.name : '', performance.now().toFixed(1))
+        console.log(`[SSE agent2] ${event.type}`, event)
       }
 
-      if (event.type === 'stage') {
-        pushToQueue(event.name, {
-          stageNum: event.stage,
-          status: event.status,
-          ...(event.status === 'completed' && event.message ? { message: event.message } : {}),
+      if (event.type === 'progress') {
+        set((s) => {
+          const p = s.pipelines[id]
+          if (!p || p.scenario !== 'processing') return s
+          const scenarioEventQueue = [...(p.scenarioEventQueue ?? []), { message: event.message }]
+          return { pipelines: { ...s.pipelines, [id]: { ...p, scenarioEventQueue } } }
         })
       } else if (event.type === 'result') {
-        const data = event.output
-        const testCases = data.scenarios.map(normalizeTestCase)
+        const testCases = event.output.scenarios.map(normalizeTestCase)
         const scenarioResult: ScenarioResult = {
-          total:    data.total_scenarios,
+          total:    event.output.total_scenarios,
           warnings: 0,
           scenarios: testCases.map(testCaseToScenarioFile),
           testCases,
@@ -532,22 +525,22 @@ async function runScenarioGeneration(id: string, set: SetFn, get: GetFn) {
         set((s) => {
           const p = s.pipelines[id]
           if (!p || p.scenario !== 'processing') return s
-          return { pipelines: { ...s.pipelines, [id]: { ...p, scenario: 'awaiting' as const, scenarioResult, scenarioEventQueue: [] } } }
+          return { pipelines: { ...s.pipelines, [id]: { ...p, scenario: 'awaiting' as const, scenarioResult, scenarioFinishedAt: new Date().toISOString() } } }
         })
       } else if (event.type === 'error') {
         set((s) => {
           const p = s.pipelines[id]
           if (!p) return s
-          return { pipelines: { ...s.pipelines, [id]: { ...p, scenario: 'failed' as const, scenarioEventQueue: [] } } }
+          return { pipelines: { ...s.pipelines, [id]: { ...p, scenario: 'failed' as const } } }
         })
       }
     }
   } catch (err) {
-    console.error('[pipeline] Scenario generation failed:', err)
+    console.error('[pipeline] Scenario generation stream failed:', err)
     set((s) => {
       const p = s.pipelines[id]
       if (!p) return s
-      return { pipelines: { ...s.pipelines, [id]: { ...p, scenario: 'failed' as const, scenarioEventQueue: [] } } }
+      return { pipelines: { ...s.pipelines, [id]: { ...p, scenario: 'failed' as const } } }
     })
   }
 
@@ -564,8 +557,8 @@ async function runScenarioGeneration(id: string, set: SetFn, get: GetFn) {
 const BLANK: ConversationPipeline = {
   stage: 0, round: 1, entryStage: 1, agentMessage: null,
   nlp: 'idle', scenario: 'idle', execution: 'idle', report: 'idle',
-  engineerInput: null, nlpResult: null, nlpProgress: {}, nlpEventQueue: [], scenarioEventQueue: [],
-  scenarioResult: null, executionResult: null, reportResult: null, priorRounds: [],
+  engineerInput: null, nlpResult: null, nlpProgress: {}, scenarioResult: null,
+  executionResult: null, reportResult: null, priorRounds: [],
 }
 
 /** Detect which stage a refactor instruction targets based on keyword analysis */
@@ -667,51 +660,45 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
         hasHydrated: true,
         pipelines: {
           ...s.pipelines,
-          [id]: { ...BLANK, stage: 1 as const, nlp: 'processing' as const, engineerInput, priorRounds, round },
+          [id]: { ...BLANK, stage: 1 as const, nlp: 'processing' as const, engineerInput, priorRounds, round, nlpStartedAt: new Date().toISOString() },
         },
       }
     })
 
     ;(async () => {
-      // Yield to the event loop so React can render the NLP card before the first SSE event arrives
-      await waitForPaint()
-
-      // Push a raw event into the animation queue — NLPCard drains it one-per-rAF
-      const pushToQueue = (name: string, patch: Partial<NLPTaskProgress>) => {
-        if (process.env.NODE_ENV === 'development') {
-          console.log(`[pipeline] pushToQueue name=${name}`, patch, performance.now().toFixed(1))
-        }
+      const updateProgress = (nodeName: string, patch: Partial<NLPTaskProgress>) => {
         set((s) => {
           const p = s.pipelines[id]
           if (!p || p.nlp !== 'processing') return s
-          const nlpEventQueue = [...(p.nlpEventQueue ?? []), { name, patch }]
-          return { pipelines: { ...s.pipelines, [id]: { ...p, nlpEventQueue } } } as Partial<PipelineStore>
+          const existing = p.nlpProgress[nodeName] ?? { stageNum: 0, status: 'running', attempt: 1, maxAttempts: 1 }
+          const nlpProgress = { ...p.nlpProgress, [nodeName]: { ...existing, ...patch } }
+          return { pipelines: { ...s.pipelines, [id]: { ...p, nlpProgress } } } as Partial<PipelineStore>
         })
       }
 
       try {
         for await (const event of streamRefineRequirements(requirements)) {
+          // Log SSE events in development
           if (process.env.NODE_ENV === 'development') {
-            console.log(`[SSE] type=${event.type}`, 'name' in event ? event.name : '', performance.now().toFixed(1))
+            console.log(`[SSE] ${event.type}`, event)
           }
 
           if (event.type === 'stage') {
-            pushToQueue(event.name, {
+            updateProgress(event.name, {
               stageNum: event.stage,
               status: event.status,
-              ...(typeof event.attempt === 'number' ? { attempt: event.attempt } : {}),
-              ...(typeof event.max_attempts === 'number' ? { maxAttempts: event.max_attempts } : {}),
+              ...(event.max_attempts ? { maxAttempts: event.max_attempts } : {}),
               ...(event.status === 'completed' && event.message ? { message: event.message } : {}),
             })
           } else if (event.type === 'attempt') {
-            pushToQueue(event.name, { attempt: event.attempt, maxAttempts: event.max })
+            updateProgress(event.name, { attempt: event.attempt, maxAttempts: event.max })
           } else if (event.type === 'validation_failed') {
-            pushToQueue(event.name, { status: 'running', attempt: event.attempt, maxAttempts: event.max })
+            updateProgress(event.name, { status: 'running', attempt: event.attempt, maxAttempts: event.max })
           } else if (event.type === 'result') {
             set((s) => {
               const p = s.pipelines[id]
               if (!p || p.nlp !== 'processing') return s
-              const updated = { ...p, nlp: 'awaiting' as const, nlpResult: normalizeResult(event.output), nlpProgress: {}, nlpEventQueue: [] }
+              const updated = { ...p, nlp: 'awaiting' as const, nlpResult: normalizeResult(event.output), nlpProgress: {}, nlpFinishedAt: new Date().toISOString() }
               return { pipelines: { ...s.pipelines, [id]: updated } }
             })
 
@@ -728,7 +715,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
             set((s) => {
               const p = s.pipelines[id]
               if (!p) return s
-              const updated = { ...p, nlp: 'failed' as const, nlpProgress: {}, nlpEventQueue: [] }
+              const updated = { ...p, nlp: 'failed' as const, nlpProgress: {} }
               return { pipelines: { ...s.pipelines, [id]: updated } }
             })
           }
@@ -738,7 +725,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
         set((s) => {
           const p = s.pipelines[id]
           if (!p) return s
-          const updated = { ...p, nlp: 'failed' as const, nlpProgress: {}, nlpEventQueue: [] }
+          const updated = { ...p, nlp: 'failed' as const, nlpProgress: {} }
           return { pipelines: { ...s.pipelines, [id]: updated } }
         })
       }
@@ -749,7 +736,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
     set((s) => {
       const p = s.pipelines[id]
       if (!p) return s
-      const updated = { ...p, nlp: 'approved' as const, stage: 2 as const, scenario: 'processing' as const }
+      const updated = { ...p, nlp: 'approved' as const, stage: 2 as const, scenario: 'processing' as const, scenarioStartedAt: new Date().toISOString() }
       return { pipelines: { ...s.pipelines, [id]: updated } }
     })
 
@@ -770,7 +757,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
     set((s) => {
       const p = s.pipelines[id]
       if (!p) return s
-      const updated = { ...p, scenario: 'approved' as const, stage: 3 as const, execution: 'processing' as const }
+      const updated = { ...p, scenario: 'approved' as const, stage: 3 as const, execution: 'processing' as const, executionStartedAt: new Date().toISOString() }
       return { pipelines: { ...s.pipelines, [id]: updated } }
     })
 
@@ -794,9 +781,12 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
           ...p,
           execution: 'approved' as const,
           executionResult: { total: p.scenarioResult?.total ?? 47, passed: p.round > 1 ? 51 : 44, failed: p.round > 1 ? 1 : 2, requeued: 1, logs },
+          executionFinishedAt: new Date().toISOString(),
           stage: 4 as const,
           report: 'awaiting' as const,
           reportResult: report,
+          reportStartedAt: new Date().toISOString(),
+          reportFinishedAt: new Date().toISOString(),
         }
         return { pipelines: { ...s.pipelines, [id]: updated } }
       })
