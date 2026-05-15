@@ -1,9 +1,19 @@
+import { flushSync } from 'react-dom'
 import { create } from 'zustand'
 import type { ConversationPipeline, NLPTaskProgress, ScenarioResult, ExecutionResult, ReportResult, LogLine, PipelineRound } from '@/types/pipeline'
 import type { RefinementResult, ValidRequirement, IncompleteRequirement, DuplicateRequirement } from '@/types/requirements'
 import { MOCK_REFINEMENT } from '@/components/requirements-review/mockData'
 import { MOCK_DEMO_PIPELINE } from '@/stores/mockData'
 import { streamRefineRequirements } from '@/services/api'
+
+const waitForPaint = () =>
+  new Promise<void>((resolve) => {
+    if (typeof window === 'undefined') {
+      resolve()
+      return
+    }
+    requestAnimationFrame(() => resolve())
+  })
 
 function normalizeValidRequirement(raw: Record<string, unknown>, index: number): ValidRequirement {
   return {
@@ -267,6 +277,9 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
     })
 
     ;(async () => {
+      // Yield to the event loop so React can render the NLP card before the first SSE event arrives
+      await waitForPaint()
+
       const updateProgress = (nodeName: string, patch: Partial<NLPTaskProgress>) => {
         set((s) => {
           const p = s.pipelines[id]
@@ -285,16 +298,26 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
           }
 
           if (event.type === 'stage') {
-            updateProgress(event.name, {
-              stageNum: event.stage,
-              status: event.status,
-              ...(event.max_attempts ? { maxAttempts: event.max_attempts } : {}),
-              ...(event.status === 'completed' && event.message ? { message: event.message } : {}),
+            flushSync(() => {
+              updateProgress(event.name, {
+                stageNum: event.stage,
+                status: event.status,
+                ...(typeof event.attempt === 'number' ? { attempt: event.attempt } : {}),
+                ...(typeof event.max_attempts === 'number' ? { maxAttempts: event.max_attempts } : {}),
+                ...(event.status === 'completed' && event.message ? { message: event.message } : {}),
+              })
             })
+            await waitForPaint()
           } else if (event.type === 'attempt') {
-            updateProgress(event.name, { attempt: event.attempt, maxAttempts: event.max })
+            flushSync(() => {
+              updateProgress(event.name, { attempt: event.attempt, maxAttempts: event.max })
+            })
+            await waitForPaint()
           } else if (event.type === 'validation_failed') {
-            updateProgress(event.name, { status: 'running', attempt: event.attempt, maxAttempts: event.max })
+            flushSync(() => {
+              updateProgress(event.name, { status: 'running', attempt: event.attempt, maxAttempts: event.max })
+            })
+            await waitForPaint()
           } else if (event.type === 'result') {
             set((s) => {
               const p = s.pipelines[id]
