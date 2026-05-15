@@ -86,6 +86,8 @@ export interface ConversationPipeline {
   report: CardState
   nlpResult: RefinementResult | null
   nlpProgress: Record<string, NLPTaskProgress>
+  /** Animation queue: events pushed immediately by SSE, drained one-per-rAF by NLPCard */
+  nlpEventQueue: Array<{ name: string; patch: Partial<NLPTaskProgress> }>
   scenarioResult: ScenarioResult | null
   executionResult: ExecutionResult | null
   reportResult: ReportResult | null

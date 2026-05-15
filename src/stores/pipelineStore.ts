@@ -1,4 +1,3 @@
-import { flushSync } from 'react-dom'
 import { create } from 'zustand'
 import type { ConversationPipeline, NLPTaskProgress, ScenarioResult, ExecutionResult, ReportResult, LogLine, PipelineRound } from '@/types/pipeline'
 import type { RefinementResult, ValidRequirement, IncompleteRequirement, DuplicateRequirement } from '@/types/requirements'
@@ -13,7 +12,8 @@ const waitForPaint = () =>
       resolve()
       return
     }
-    requestAnimationFrame(() => resolve())
+    // Two RAFs guarantees a paint has occurred before continuing.
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   })
 
 function normalizeValidRequirement(raw: Record<string, unknown>, index: number): ValidRequirement {
@@ -532,7 +532,7 @@ async function runScenarioGeneration(id: string, set: SetFn, get: GetFn) {
 const BLANK: ConversationPipeline = {
   stage: 0, round: 1, entryStage: 1, agentMessage: null,
   nlp: 'idle', scenario: 'idle', execution: 'idle', report: 'idle',
-  engineerInput: null, nlpResult: null, nlpProgress: {}, scenarioResult: null,
+  engineerInput: null, nlpResult: null, nlpProgress: {}, nlpEventQueue: [], scenarioResult: null,
   executionResult: null, reportResult: null, priorRounds: [],
 }
 
@@ -644,49 +644,42 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
       // Yield to the event loop so React can render the NLP card before the first SSE event arrives
       await waitForPaint()
 
-      const updateProgress = (nodeName: string, patch: Partial<NLPTaskProgress>) => {
+      // Push a raw event into the animation queue — NLPCard drains it one-per-rAF
+      const pushToQueue = (name: string, patch: Partial<NLPTaskProgress>) => {
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`[pipeline] pushToQueue name=${name}`, patch, performance.now().toFixed(1))
+        }
         set((s) => {
           const p = s.pipelines[id]
           if (!p || p.nlp !== 'processing') return s
-          const existing = p.nlpProgress[nodeName] ?? { stageNum: 0, status: 'running', attempt: 1, maxAttempts: 1 }
-          const nlpProgress = { ...p.nlpProgress, [nodeName]: { ...existing, ...patch } }
-          return { pipelines: { ...s.pipelines, [id]: { ...p, nlpProgress } } } as Partial<PipelineStore>
+          const nlpEventQueue = [...(p.nlpEventQueue ?? []), { name, patch }]
+          return { pipelines: { ...s.pipelines, [id]: { ...p, nlpEventQueue } } } as Partial<PipelineStore>
         })
       }
 
       try {
         for await (const event of streamRefineRequirements(requirements)) {
-          // Log SSE events in development
           if (process.env.NODE_ENV === 'development') {
-            console.log(`[SSE] ${event.type}`, event)
+            console.log(`[SSE] type=${event.type}`, 'name' in event ? event.name : '', performance.now().toFixed(1))
           }
 
           if (event.type === 'stage') {
-            flushSync(() => {
-              updateProgress(event.name, {
-                stageNum: event.stage,
-                status: event.status,
-                ...(typeof event.attempt === 'number' ? { attempt: event.attempt } : {}),
-                ...(typeof event.max_attempts === 'number' ? { maxAttempts: event.max_attempts } : {}),
-                ...(event.status === 'completed' && event.message ? { message: event.message } : {}),
-              })
+            pushToQueue(event.name, {
+              stageNum: event.stage,
+              status: event.status,
+              ...(typeof event.attempt === 'number' ? { attempt: event.attempt } : {}),
+              ...(typeof event.max_attempts === 'number' ? { maxAttempts: event.max_attempts } : {}),
+              ...(event.status === 'completed' && event.message ? { message: event.message } : {}),
             })
-            await waitForPaint()
           } else if (event.type === 'attempt') {
-            flushSync(() => {
-              updateProgress(event.name, { attempt: event.attempt, maxAttempts: event.max })
-            })
-            await waitForPaint()
+            pushToQueue(event.name, { attempt: event.attempt, maxAttempts: event.max })
           } else if (event.type === 'validation_failed') {
-            flushSync(() => {
-              updateProgress(event.name, { status: 'running', attempt: event.attempt, maxAttempts: event.max })
-            })
-            await waitForPaint()
+            pushToQueue(event.name, { status: 'running', attempt: event.attempt, maxAttempts: event.max })
           } else if (event.type === 'result') {
             set((s) => {
               const p = s.pipelines[id]
               if (!p || p.nlp !== 'processing') return s
-              const updated = { ...p, nlp: 'awaiting' as const, nlpResult: normalizeResult(event.output), nlpProgress: {} }
+              const updated = { ...p, nlp: 'awaiting' as const, nlpResult: normalizeResult(event.output), nlpProgress: {}, nlpEventQueue: [] }
               return { pipelines: { ...s.pipelines, [id]: updated } }
             })
 
@@ -703,7 +696,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
             set((s) => {
               const p = s.pipelines[id]
               if (!p) return s
-              const updated = { ...p, nlp: 'failed' as const, nlpProgress: {} }
+              const updated = { ...p, nlp: 'failed' as const, nlpProgress: {}, nlpEventQueue: [] }
               return { pipelines: { ...s.pipelines, [id]: updated } }
             })
           }
@@ -713,7 +706,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => {
         set((s) => {
           const p = s.pipelines[id]
           if (!p) return s
-          const updated = { ...p, nlp: 'failed' as const, nlpProgress: {} }
+          const updated = { ...p, nlp: 'failed' as const, nlpProgress: {}, nlpEventQueue: [] }
           return { pipelines: { ...s.pipelines, [id]: updated } }
         })
       }

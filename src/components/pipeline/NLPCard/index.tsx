@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import {
@@ -15,7 +15,7 @@ import {
 import { usePipelineStore } from '@/stores/pipelineStore'
 import { Badge, Button } from '@/components/ui'
 import { cn } from '@/lib/utils'
-import type { CardState } from '@/types/pipeline'
+import type { CardState, NLPTaskProgress } from '@/types/pipeline'
 import type { RefinementResult } from '@/types/requirements'
 
 // ─── Task definitions (mirrors SSE task_name values) ─────────────────────────
@@ -43,18 +43,57 @@ export default function NLPCard({ state, result }: Props) {
   const params = useParams() as { projectId?: string; conversationId?: string } | null
   const convId    = params?.conversationId ?? ''
   const projectId = params?.projectId ?? ''
-  const approveNLP  = usePipelineStore(s => s.approveNLP)
-  const nlpProgress = usePipelineStore(s => s.pipelines[convId]?.nlpProgress ?? {})
+  const approveNLP    = usePipelineStore(s => s.approveNLP)
+  const nlpEventQueue = usePipelineStore(s => s.pipelines[convId]?.nlpEventQueue ?? [])
+  const round         = usePipelineStore(s => s.pipelines[convId]?.round ?? 1)
+
+  // Local display state — animated from the queue one entry per rAF
+  const [displayProgress, setDisplayProgress] = useState<Record<string, NLPTaskProgress>>({})
+  const processedCountRef = useRef(0)
+
+  // Reset display whenever a new pipeline round starts
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[NLPCard] round changed → ${round}, resetting display`, performance.now().toFixed(1))
+    }
+    processedCountRef.current = 0
+    setDisplayProgress({})
+  }, [round])
+
+  // Drain the event queue one entry per animation frame
+  useEffect(() => {
+    if (processedCountRef.current >= nlpEventQueue.length) return
+
+    const rafId = requestAnimationFrame(() => {
+      const idx = processedCountRef.current
+      if (idx >= nlpEventQueue.length) return
+      const entry = nlpEventQueue[idx]
+      processedCountRef.current = idx + 1
+
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[NLPCard] rAF ${idx} → ${entry.name}`, entry.patch, performance.now().toFixed(1))
+      }
+
+      setDisplayProgress(prev => {
+        const existing = prev[entry.name] ?? { stageNum: 0, status: 'running' as const, attempt: 1, maxAttempts: 1 }
+        return { ...prev, [entry.name]: { ...existing, ...entry.patch } }
+      })
+    })
+
+    return () => cancelAnimationFrame(rafId)
+  // Re-run whenever the queue grows or after each display update
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nlpEventQueue, displayProgress])
 
   const summary = result?.summary
   // Only conflicts block the gate — duplicates are informational and never block.
   const isBlocked = (result?.summary.total_conflicts ?? 0) > 0
 
-  // nlpProgress is keyed by event.name — look up directly by task name
-  const getTaskProgress = (taskName: string) => nlpProgress[taskName]
+  // displayProgress is keyed by event.name
+  const getTaskProgress = (taskName: string) => displayProgress[taskName]
 
   const getTaskStatus = (taskName: string): TaskStatus => {
-    const p = nlpProgress[taskName]
+    const p = displayProgress[taskName]
     if (!p) return 'idle'
     return p.status === 'completed' ? 'done' : 'running'
   }

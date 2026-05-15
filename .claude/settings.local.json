@@ -29,7 +29,9 @@
       "Bash(Get-ChildItem -Path src -Directory)",
       "Bash(Select-Object Name)",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\pc\\\\Desktop\\\\my\\\\pfe2026\\\\project\\\\Veridian_frontend\" -Recurse -Filter \"*requirements*\" -File)",
-      "Bash(Select-Object -ExpandProperty FullName)"
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Select-String -Pattern \"zustand|react|next\")",
+      "PowerShell(cd \"C:\\\\Users\\\\pc\\\\Desktop\\\\my\\\\pfe2026\\\\project\\\\Veridian_frontend\" && \\(Get-Content package.json | Select-String \"zustand|\\\\\"react\\\\\"|\\\\\"next\\\\\"\"\\) | ForEach-Object { $_.Line.Trim\\(\\) })"
     ]
   }
 }

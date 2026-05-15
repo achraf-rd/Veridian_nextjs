@@ -266,6 +266,7 @@ export const MOCK_DEMO_PIPELINE: ConversationPipeline = {
   engineerInput: 'Loaded from: lka_requirements_veridian.xlsx (20 raw requirements)',
   nlpResult: MOCK_DEMO_NLP_RESULT,
   nlpProgress: {},
+  nlpEventQueue: [],
   scenarioResult: null,
   executionResult: null,
   reportResult: null,

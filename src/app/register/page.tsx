@@ -105,7 +105,7 @@ export default function RegisterPage() {
       if (result?.error) {
         setError('Registration successful, but login failed. Please sign in.')
       } else if (result?.ok) {
-        router.push('/project')
+        router.push('/')
       }
     } catch (err) {
       setError('An error occurred. Please try again.')
