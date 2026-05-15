@@ -11,7 +11,7 @@ export async function* streamRefineRequirements(
   })
 
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
-
+  console.log('response', response)
   const reader = response.body!.getReader()
   const decoder = new TextDecoder()
   let buffer = ''

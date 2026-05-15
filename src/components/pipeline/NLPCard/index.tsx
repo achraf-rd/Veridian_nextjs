@@ -43,8 +43,8 @@ export default function NLPCard({ state, result }: Props) {
   const params = useParams() as { projectId?: string; conversationId?: string } | null
   const convId    = params?.conversationId ?? ''
   const projectId = params?.projectId ?? ''
-  const { approveNLP, getPipeline } = usePipelineStore()
-  const nlpProgress = getPipeline(convId).nlpProgress ?? {}
+  const approveNLP  = usePipelineStore(s => s.approveNLP)
+  const nlpProgress = usePipelineStore(s => s.pipelines[convId]?.nlpProgress ?? {})
 
   const summary = result?.summary
   // Only conflicts block the gate — duplicates are informational and never block.
