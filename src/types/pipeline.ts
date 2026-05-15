@@ -1,5 +1,5 @@
 import type { RefinementResult } from '@/types/requirements'
-import type { TestCase } from '@/types/agent2'
+import type { GenerateResponse, TestCase } from '@/types/agent2'
 
 export type CardState = 'idle' | 'processing' | 'awaiting' | 'approved' | 'failed'
 
@@ -16,6 +16,17 @@ export type RefinementEvent =
   | { type: 'attempt'; name: string; attempt: number; max: number }
   | { type: 'validation_failed'; name: string; attempt: number; max: number }
   | { type: 'result'; output: RefinementResult }
+  | { type: 'error'; detail: string }
+
+export interface ScenarioTaskProgress {
+  stageNum: number
+  status: 'running' | 'completed'
+  message?: string
+}
+
+export type ScenarioEvent =
+  | { type: 'stage'; stage: number; name: string; label: string; status: 'running' | 'completed'; message?: string }
+  | { type: 'result'; output: GenerateResponse }
   | { type: 'error'; detail: string }
 
 export interface ScenarioFile {
@@ -88,6 +99,8 @@ export interface ConversationPipeline {
   nlpProgress: Record<string, NLPTaskProgress>
   /** Animation queue: events pushed immediately by SSE, drained one-per-rAF by NLPCard */
   nlpEventQueue: Array<{ name: string; patch: Partial<NLPTaskProgress> }>
+  /** Animation queue for ScenarioCard SSE events, drained one-per-rAF */
+  scenarioEventQueue: Array<{ name: string; patch: Partial<ScenarioTaskProgress> }>
   scenarioResult: ScenarioResult | null
   executionResult: ExecutionResult | null
   reportResult: ReportResult | null

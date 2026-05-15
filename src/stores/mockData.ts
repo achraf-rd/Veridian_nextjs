@@ -267,6 +267,7 @@ export const MOCK_DEMO_PIPELINE: ConversationPipeline = {
   nlpResult: MOCK_DEMO_NLP_RESULT,
   nlpProgress: {},
   nlpEventQueue: [],
+  scenarioEventQueue: [],
   scenarioResult: null,
   executionResult: null,
   reportResult: null,

@@ -1,10 +1,10 @@
 import { create } from 'zustand'
-import type { ConversationPipeline, NLPTaskProgress, ScenarioResult, ExecutionResult, ReportResult, LogLine, PipelineRound } from '@/types/pipeline'
+import type { ConversationPipeline, NLPTaskProgress, ScenarioTaskProgress, ScenarioResult, ExecutionResult, ReportResult, LogLine, PipelineRound } from '@/types/pipeline'
 import type { RefinementResult, ValidRequirement, IncompleteRequirement, DuplicateRequirement } from '@/types/requirements'
 import type { TestCase } from '@/types/agent2'
 import { MOCK_REFINEMENT } from '@/components/requirements-review/mockData'
 import { MOCK_DEMO_PIPELINE } from '@/stores/mockData'
-import { streamRefineRequirements, generateScenarios } from '@/services/api'
+import { streamRefineRequirements, streamGenerateScenarios } from '@/services/api'
 
 const waitForPaint = () =>
   new Promise<void>((resolve) => {
@@ -490,32 +490,64 @@ async function runScenarioGeneration(id: string, set: SetFn, get: GetFn) {
   const nlpResult = get().pipelines[id]?.nlpResult
   if (!nlpResult) return
 
-  try {
-    const data = await generateScenarios({
-      refining_id:  nlpResult.refining_id ?? null,
-      feature:      nlpResult.feature     ?? null,
-      requirements: nlpResult.testable    as unknown as Record<string, unknown>[],
-    })
+  await waitForPaint()
 
-    const testCases = data.scenarios.map(normalizeTestCase)
-    const scenarioResult: ScenarioResult = {
-      total:    data.total_scenarios,
-      warnings: 0,
-      scenarios: testCases.map(testCaseToScenarioFile),
-      testCases,
+  const pushToQueue = (name: string, patch: Partial<ScenarioTaskProgress>) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[pipeline] scenario pushToQueue name=${name}`, patch, performance.now().toFixed(1))
     }
-
     set((s) => {
       const p = s.pipelines[id]
       if (!p || p.scenario !== 'processing') return s
-      return { pipelines: { ...s.pipelines, [id]: { ...p, scenario: 'awaiting' as const, scenarioResult } } }
+      const scenarioEventQueue = [...(p.scenarioEventQueue ?? []), { name, patch }]
+      return { pipelines: { ...s.pipelines, [id]: { ...p, scenarioEventQueue } } } as Partial<PipelineStore>
     })
+  }
+
+  try {
+    for await (const event of streamGenerateScenarios({
+      refining_id:  nlpResult.refining_id ?? null,
+      feature:      nlpResult.feature     ?? null,
+      requirements: nlpResult.testable    as unknown as Record<string, unknown>[],
+    })) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[SSE agent2] type=${event.type}`, 'name' in event ? event.name : '', performance.now().toFixed(1))
+      }
+
+      if (event.type === 'stage') {
+        pushToQueue(event.name, {
+          stageNum: event.stage,
+          status: event.status,
+          ...(event.status === 'completed' && event.message ? { message: event.message } : {}),
+        })
+      } else if (event.type === 'result') {
+        const data = event.output
+        const testCases = data.scenarios.map(normalizeTestCase)
+        const scenarioResult: ScenarioResult = {
+          total:    data.total_scenarios,
+          warnings: 0,
+          scenarios: testCases.map(testCaseToScenarioFile),
+          testCases,
+        }
+        set((s) => {
+          const p = s.pipelines[id]
+          if (!p || p.scenario !== 'processing') return s
+          return { pipelines: { ...s.pipelines, [id]: { ...p, scenario: 'awaiting' as const, scenarioResult, scenarioEventQueue: [] } } }
+        })
+      } else if (event.type === 'error') {
+        set((s) => {
+          const p = s.pipelines[id]
+          if (!p) return s
+          return { pipelines: { ...s.pipelines, [id]: { ...p, scenario: 'failed' as const, scenarioEventQueue: [] } } }
+        })
+      }
+    }
   } catch (err) {
     console.error('[pipeline] Scenario generation failed:', err)
     set((s) => {
       const p = s.pipelines[id]
       if (!p) return s
-      return { pipelines: { ...s.pipelines, [id]: { ...p, scenario: 'failed' as const } } }
+      return { pipelines: { ...s.pipelines, [id]: { ...p, scenario: 'failed' as const, scenarioEventQueue: [] } } }
     })
   }
 
@@ -532,8 +564,8 @@ async function runScenarioGeneration(id: string, set: SetFn, get: GetFn) {
 const BLANK: ConversationPipeline = {
   stage: 0, round: 1, entryStage: 1, agentMessage: null,
   nlp: 'idle', scenario: 'idle', execution: 'idle', report: 'idle',
-  engineerInput: null, nlpResult: null, nlpProgress: {}, nlpEventQueue: [], scenarioResult: null,
-  executionResult: null, reportResult: null, priorRounds: [],
+  engineerInput: null, nlpResult: null, nlpProgress: {}, nlpEventQueue: [], scenarioEventQueue: [],
+  scenarioResult: null, executionResult: null, reportResult: null, priorRounds: [],
 }
 
 /** Detect which stage a refactor instruction targets based on keyword analysis */

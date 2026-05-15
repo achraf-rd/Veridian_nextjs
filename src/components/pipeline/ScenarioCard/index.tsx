@@ -2,16 +2,87 @@
 
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { ChevronDown, ChevronUp, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react'
-import { useState, useMemo } from 'react'
+import {
+  ChevronDown,
+  ChevronUp,
+  CheckCircle2,
+  Loader2,
+  AlertTriangle,
+  Circle,
+} from 'lucide-react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { usePipelineStore } from '@/stores/pipelineStore'
 import { Badge, Button } from '@/components/ui'
 import { cn } from '@/lib/utils'
-import type { CardState, ScenarioResult } from '@/types/pipeline'
+import type { CardState, ScenarioResult, ScenarioTaskProgress } from '@/types/pipeline'
 
-interface Props {
-  state: CardState
-  result: ScenarioResult | null
+// ─── Task definitions (mirrors Agent 2 internal pipeline stages) ──────────────
+
+const TASKS = [
+  { num: 1, name: 'clean',    fn: 'clean()',    done: 'requirements cleaned' },
+  { num: 2, name: 'group',    fn: 'group()',    done: 'requirements grouped' },
+  { num: 3, name: 'generate', fn: 'generate()', done: 'scenarios generated'  },
+  { num: 4, name: 'merge',    fn: 'merge()',    done: 'results merged'        },
+  { num: 5, name: 'evaluate', fn: 'evaluate()', done: 'best scenarios selected' },
+] as const
+
+type TaskStatus = 'idle' | 'running' | 'done'
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function TaskRow({
+  task,
+  status,
+  message,
+}: {
+  task: (typeof TASKS)[number]
+  status: TaskStatus
+  message?: string
+}) {
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-3 text-[12px] transition-opacity duration-200',
+        status === 'idle' && 'opacity-35',
+      )}
+    >
+      <span className="w-4 flex-shrink-0 flex items-center justify-center">
+        {status === 'done'    && <CheckCircle2 className="w-3.5 h-3.5 text-success" />}
+        {status === 'running' && <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />}
+        {status === 'idle'    && <Circle className="w-3.5 h-3.5 text-vrd-border" />}
+      </span>
+
+      <span
+        className={cn(
+          'font-mono',
+          status === 'done'    && 'text-vrd-text-muted',
+          status === 'running' && 'text-primary',
+          status === 'idle'    && 'text-vrd-text-dim',
+        )}
+      >
+        Task {task.num}
+      </span>
+      <span
+        className={cn(
+          'font-mono',
+          status === 'done'    && 'text-vrd-text',
+          status === 'running' && 'text-vrd-text font-semibold',
+          status === 'idle'    && 'text-vrd-text-dim',
+        )}
+      >
+        {task.fn}
+      </span>
+
+      <span className="ml-auto font-mono text-[11px] flex items-center gap-2">
+        {status === 'running' && (
+          <span className="text-primary animate-pulse">running…</span>
+        )}
+        {status === 'done' && (
+          <span className="text-success">{message ?? task.done}</span>
+        )}
+      </span>
+    </div>
+  )
 }
 
 function ComplexityChip({ level, count }: { level: string; count: number }) {
@@ -40,17 +111,64 @@ function PhaseChip({ phase, count }: { phase: string; count: number }) {
   )
 }
 
+// ─── Main component ───────────────────────────────────────────────────────────
+
+interface Props {
+  state: CardState
+  result: ScenarioResult | null
+}
+
 export default function ScenarioCard({ state, result }: Props) {
   const [expanded, setExpanded] = useState(false)
+
   const params = useParams() as { projectId?: string; conversationId?: string } | null
-  const convId = params?.conversationId ?? ''
+  const convId    = params?.conversationId ?? ''
   const projectId = params?.projectId ?? ''
   const { approveScenario } = usePipelineStore()
+  const scenarioEventQueue = usePipelineStore(s => s.pipelines[convId]?.scenarioEventQueue ?? [])
+  const round              = usePipelineStore(s => s.pipelines[convId]?.round ?? 1)
 
-  const isProcessing = state === 'processing'
-  const isAwaiting = state === 'awaiting'
-  const isApproved = state === 'approved'
-  const isIdle = state === 'idle'
+  // Local display state — drained from the queue one entry per rAF
+  const [displayProgress, setDisplayProgress] = useState<Record<string, ScenarioTaskProgress>>({})
+  const processedCountRef = useRef(0)
+
+  // Reset when a new round starts
+  useEffect(() => {
+    processedCountRef.current = 0
+    setDisplayProgress({})
+  }, [round])
+
+  // Drain queue one entry per animation frame
+  useEffect(() => {
+    if (processedCountRef.current >= scenarioEventQueue.length) return
+
+    const rafId = requestAnimationFrame(() => {
+      const idx = processedCountRef.current
+      if (idx >= scenarioEventQueue.length) return
+      const entry = scenarioEventQueue[idx]
+      processedCountRef.current = idx + 1
+
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[ScenarioCard] rAF ${idx} → ${entry.name}`, entry.patch, performance.now().toFixed(1))
+      }
+
+      setDisplayProgress(prev => {
+        const existing = prev[entry.name] ?? { stageNum: 0, status: 'running' as const }
+        return { ...prev, [entry.name]: { ...existing, ...entry.patch } }
+      })
+    })
+
+    return () => cancelAnimationFrame(rafId)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenarioEventQueue, displayProgress])
+
+  const getTaskStatus = (taskName: string): TaskStatus => {
+    const p = displayProgress[taskName]
+    if (!p) return 'idle'
+    return p.status === 'completed' ? 'done' : 'running'
+  }
+
+  const getTaskMessage = (taskName: string) => displayProgress[taskName]?.message
 
   const testCases = result?.testCases ?? []
 
@@ -70,43 +188,106 @@ export default function ScenarioCard({ state, result }: Props) {
     return { complexity, phase, tags, reqCount: reqSet.size }
   }, [testCases])
 
-  if (isIdle) return null
+  if (state === 'idle') return null
+
+  // ── Approved (collapsed) ───────────────────────────────────────────────────
+  if (state === 'approved') {
+    return (
+      <div className="rounded-xl border border-success/20 bg-vrd-card animate-fade-up">
+        <div className="flex items-center gap-3 px-4 py-3">
+          <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <span className="text-xs font-mono font-medium text-vrd-text-muted uppercase tracking-wider">
+              Scenario Generator
+            </span>
+            <p className="text-sm text-vrd-text mt-0.5">
+              Approved —{' '}
+              <span className="text-vrd-text-muted">
+                {testCases.length > 0
+                  ? `${testCases.length} scenarios across ${stats?.reqCount ?? 0} requirements`
+                  : `${result?.total ?? 0} scenarios generated`}
+              </span>
+            </p>
+          </div>
+          <Badge variant="success">Approved</Badge>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Failed ─────────────────────────────────────────────────────────────────
+  if (state === 'failed') {
+    return (
+      <div className="rounded-xl border border-danger/20 bg-vrd-card animate-fade-up">
+        <div className="flex items-center gap-3 px-4 py-3">
+          <AlertTriangle className="w-4 h-4 text-danger flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <span className="text-xs font-mono font-medium text-vrd-text-muted uppercase tracking-wider">
+              Scenario Generator
+            </span>
+            <p className="text-sm text-vrd-text mt-0.5">
+              Generation failed —{' '}
+              <span className="text-vrd-text-muted">check console and retry.</span>
+            </p>
+          </div>
+          <Badge variant="danger">Failed</Badge>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Processing — SSE task log ──────────────────────────────────────────────
+  if (state === 'processing') {
+    return (
+      <div className="rounded-xl border border-primary/30 bg-vrd-card animate-fade-up">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-vrd-border">
+          <Loader2 className="w-4 h-4 text-primary animate-spin flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <span className="text-xs font-mono font-medium text-vrd-text-muted uppercase tracking-wider">
+              Scenario Generator
+            </span>
+            <p className="text-sm text-vrd-text-muted mt-0.5">Running pipeline…</p>
+          </div>
+          <Badge variant="info">Processing</Badge>
+        </div>
+
+        <div className="px-4 py-3 space-y-2.5 font-mono">
+          {TASKS.map((task) => (
+            <TaskRow
+              key={task.num}
+              task={task}
+              status={getTaskStatus(task.name)}
+              message={getTaskMessage(task.name)}
+            />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  // ── Awaiting approval ──────────────────────────────────────────────────────
+  if (!result) return null
 
   return (
-    <div
-      className={cn(
-        'rounded-xl border transition-all duration-300 animate-fade-up',
-        isProcessing && 'border-primary/30 bg-vrd-card animate-pulse-ring',
-        isAwaiting && 'border-warning/30 bg-vrd-card',
-        isApproved && 'border-success/20 bg-vrd-card',
-      )}
-    >
+    <div className="rounded-xl border border-warning/30 bg-vrd-card animate-fade-up transition-all duration-300">
       <div className="flex items-start gap-3 px-4 py-3">
-        <div className="mt-0.5">
-          {isProcessing && <Loader2 className="w-4 h-4 text-primary animate-spin" />}
-          {isAwaiting && <AlertTriangle className="w-4 h-4 text-warning" />}
-          {isApproved && <CheckCircle2 className="w-4 h-4 text-success" />}
-        </div>
+        <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-0.5">
-            <span className="text-xs font-mono font-medium text-vrd-text-muted uppercase tracking-wider">Scenario Generator</span>
-            {isApproved && <Badge variant="success">Approved</Badge>}
-            {isAwaiting && <Badge variant="warning">Awaiting approval</Badge>}
+            <span className="text-xs font-mono font-medium text-vrd-text-muted uppercase tracking-wider">
+              Scenario Generator
+            </span>
+            <Badge variant="warning">Awaiting approval</Badge>
           </div>
 
-          {isProcessing && (
-            <p className="text-sm text-vrd-text-muted">Generating test plan…</p>
-          )}
-
-          {(isAwaiting || isApproved) && result && stats && (
+          {stats ? (
             <div className="space-y-2">
               <p className="text-sm text-vrd-text">
                 <span className="font-medium">{testCases.length} scenarios</span> generated across{' '}
                 <span className="font-medium">{stats.reqCount} requirements</span>.
               </p>
 
-              {/* Complexity chips */}
               <div className="flex flex-wrap gap-1.5">
                 {(['LOW', 'MEDIUM', 'HIGH'] as const).map((lvl) =>
                   stats.complexity[lvl] > 0 ? (
@@ -120,22 +301,23 @@ export default function ScenarioCard({ state, result }: Props) {
                 )}
               </div>
 
-              {/* Tag chips */}
               {Object.keys(stats.tags).length > 0 && (
                 <div className="flex flex-wrap gap-1">
                   {Object.entries(stats.tags).map(([tag, count]) => (
-                    <span key={tag} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] bg-vrd-card-hover text-vrd-text-muted">
+                    <span
+                      key={tag}
+                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] bg-vrd-card-hover text-vrd-text-muted"
+                    >
                       {tag} · {count}
                     </span>
                   ))}
                 </div>
               )}
             </div>
-          )}
-
-          {(isAwaiting || isApproved) && result && !stats && (
+          ) : (
             <p className="text-sm text-vrd-text">
-              Scenario generation complete — <span className="font-medium">{result.total} scenarios</span> generated
+              Scenario generation complete —{' '}
+              <span className="font-medium">{result.total} scenarios</span> generated
               {result.warnings > 0 && (
                 <>, <span className="text-warning font-medium">{result.warnings} ASAM warnings</span></>
               )}.
@@ -143,8 +325,11 @@ export default function ScenarioCard({ state, result }: Props) {
           )}
         </div>
 
-        {(isAwaiting || isApproved) && result && !stats && (
-          <button onClick={() => setExpanded((v) => !v)} className="text-vrd-text-muted hover:text-vrd-text transition-colors flex-shrink-0">
+        {result && !stats && (
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="text-vrd-text-muted hover:text-vrd-text transition-colors flex-shrink-0"
+          >
             {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
         )}
@@ -175,22 +360,18 @@ export default function ScenarioCard({ state, result }: Props) {
         </div>
       )}
 
-      {(isAwaiting || isApproved) && (
-        <div className="flex items-center gap-2 px-4 py-3 border-t border-vrd-border">
-          <Link
-            href={`/project/${projectId}/conversation/${convId}/scenarios`}
-            className="text-xs font-medium text-primary-light hover:underline"
-          >
-            Review scenarios →
-          </Link>
-          {isAwaiting && (
-            <Button size="sm" onClick={() => approveScenario(convId)} className="ml-auto animate-pulse-amber">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              Approve &amp; execute
-            </Button>
-          )}
-        </div>
-      )}
+      <div className="flex items-center gap-2 px-4 py-3 border-t border-vrd-border">
+        <Link
+          href={`/project/${projectId}/conversation/${convId}/scenarios`}
+          className="text-xs font-medium text-primary-light hover:underline"
+        >
+          Review scenarios →
+        </Link>
+        <Button size="sm" onClick={() => approveScenario(convId)} className="ml-auto animate-pulse-amber">
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          Approve &amp; execute
+        </Button>
+      </div>
     </div>
   )
 }
