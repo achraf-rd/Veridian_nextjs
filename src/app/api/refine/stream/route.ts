@@ -1,6 +1,8 @@
 import { type NextRequest } from 'next/server'
 import { createRequestLogger } from '@/lib/api-logger'
 
+export const preferredRegion = ['cdg1']
+
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://adas-req-refiner.fly.dev'
 
 export async function POST(request: NextRequest) {

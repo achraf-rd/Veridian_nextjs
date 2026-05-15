@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { createRequestLogger } from '@/lib/api-logger'
 
+export const preferredRegion = ['cdg1']
+
 const AGENT2_URL = process.env.AGENT2_URL ?? 'https://agenticve-testing.fly.dev'
 
 export async function POST(request: NextRequest) {

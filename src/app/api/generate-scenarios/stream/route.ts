@@ -1,6 +1,9 @@
 import { type NextRequest } from 'next/server'
 import { createRequestLogger } from '@/lib/api-logger'
 
+// Co-locate with the Fly.io backend (deployed in cdg1 / Paris)
+export const preferredRegion = ['cdg1']
+
 const AGENT2_URL = process.env.AGENT2_URL ?? 'https://agenticve-testing.fly.dev'
 
 function sseEvent(data: object): Uint8Array {
